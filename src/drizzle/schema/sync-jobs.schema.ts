@@ -6,20 +6,20 @@ import {
   index,
   integer,
   jsonb,
+  pgEnum,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
-import { z } from 'zod';
 import { googleAdsAccounts } from './google-ads-accounts.schema';
 
-export const syncJobStatusEnum = z.enum([
+export const syncJobStatusEnum = pgEnum('sync_job_status', [
   'pending',
   'running',
   'completed',
   'failed',
 ]);
 
-export type TSyncJobStatus = z.infer<typeof syncJobStatusEnum>;
+export type TSyncJobStatus = (typeof syncJobStatusEnum.enumValues)[number];
 
 export const syncJobs = pgTable(
   'sync_jobs',
@@ -28,7 +28,7 @@ export const syncJobs = pgTable(
     googleAccountId: uuid('google_account_id')
       .notNull()
       .references(() => googleAdsAccounts.id, { onDelete: 'cascade' }),
-    status: text('status').notNull().default('pending'),
+    status: syncJobStatusEnum('status').notNull().default('pending'),
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),
     recordsProcessed: integer('records_processed').default(0),
@@ -49,16 +49,13 @@ export const syncJobs = pgTable(
 const baseInsertSchema = createInsertSchema(syncJobs);
 const baseSelectSchema = createSelectSchema(syncJobs);
 
-export const insertSyncJobSchema = baseInsertSchema.extend({
-  status: syncJobStatusEnum,
-});
-
+export const insertSyncJobSchema = baseInsertSchema;
 export const selectSyncJobSchema = baseSelectSchema;
 export const updateSyncJobSchema = insertSyncJobSchema.partial();
 
-export type TInsertSyncJob = z.infer<typeof insertSyncJobSchema>;
-export type TSelectSyncJob = z.infer<typeof selectSyncJobSchema>;
-export type TUpdateSyncJob = z.infer<typeof updateSyncJobSchema>;
+export type TInsertSyncJob = typeof syncJobs.$inferInsert;
+export type TSelectSyncJob = typeof syncJobs.$inferSelect;
+export type TUpdateSyncJob = Partial<TInsertSyncJob>;
 
 export const syncJobsRelations = relations(syncJobs, ({ one }) => ({
   googleAccount: one(googleAdsAccounts, {

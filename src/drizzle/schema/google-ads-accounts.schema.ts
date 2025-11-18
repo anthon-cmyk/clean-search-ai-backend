@@ -11,21 +11,24 @@ import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
 import { z } from 'zod';
 import { searchTerms } from './search-terms.schema';
 import { syncJobs } from './sync-jobs.schema';
+import { encryptedText } from 'src/common/crypto/encrypted-text.type';
 
 export const googleAdsAccounts = pgTable(
   'google_ads_accounts',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    // Links to Supabase auth.users - no FK constraint since it's in different schema
+    // Links to Supabase auth.users
     userId: uuid('user_id').notNull(),
     googleEmail: text('google_email').notNull(),
     googleUserId: text('google_user_id').notNull().unique(),
-    // These should be encrypted in production
-    accessToken: text('access_token').notNull(),
-    refreshToken: text('refresh_token').notNull(),
+
+    // Encrypted fields
+    accessToken: encryptedText('access_token').notNull(),
+    refreshToken: encryptedText('refresh_token').notNull(),
+
     tokenExpiresAt: timestamp('token_expires_at').notNull(),
     scopes: text('scopes').array().notNull(),
-    // Google Ads Customer ID (format: 123-456-7890)
+    // Google Ads Customer ID
     adsCustomerId: text('ads_customer_id'),
     isActive: boolean('is_active').default(true).notNull(),
     lastSyncedAt: timestamp('last_synced_at'),
