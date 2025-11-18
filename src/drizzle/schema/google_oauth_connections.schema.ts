@@ -5,6 +5,7 @@ import {
   timestamp,
   index,
   boolean,
+  unique,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
@@ -34,6 +35,10 @@ export const googleOauthConnections = pgTable(
     userIdIdx: index('google_oauth_connections_user_id_idx').on(table.userId),
     googleUserIdIdx: index('google_oauth_connections_google_user_id_idx').on(
       table.googleUserId,
+    ),
+    uniqueUserEmail: unique('user_email_unique').on(
+      table.userId,
+      table.googleEmail,
     ),
   }),
 );
