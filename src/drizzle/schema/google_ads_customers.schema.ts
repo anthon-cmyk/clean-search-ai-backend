@@ -26,6 +26,11 @@ export const googleAdsCustomers = pgTable(
     customerName: text('customer_name'),
     customerDescriptiveName: text('customer_descriptive_name'),
 
+    // The ID you use for authentication
+    // For manager accounts, this is the manager's ID
+    // For direct accounts, this is the same as customerId
+    loginCustomerId: text('login_customer_id').notNull(),
+
     // Manager account info if applicable
     isManagerAccount: boolean('is_manager_account').default(false).notNull(),
     managerCustomerId: text('manager_customer_id'),
