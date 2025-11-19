@@ -1,5 +1,5 @@
 {
-  "id": "9335dd6d-aefd-41e2-84d2-87f40d5fb5c7",
+  "id": "175d7c1f-5689-40d4-ab02-6e2724f021f9",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -38,6 +38,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "login_customer_id": {
+          "name": "login_customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
         },
         "is_manager_account": {
           "name": "is_manager_account",
@@ -275,6 +281,14 @@
           "nullsNotDistinct": false,
           "columns": [
             "google_user_id"
+          ]
+        },
+        "user_email_unique": {
+          "name": "user_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id",
+            "google_email"
           ]
         }
       },

@@ -5,6 +5,7 @@ CREATE TABLE "google_ads_customers" (
 	"customer_id" text NOT NULL,
 	"customer_name" text,
 	"customer_descriptive_name" text,
+	"login_customer_id" text NOT NULL,
 	"is_manager_account" boolean DEFAULT false NOT NULL,
 	"manager_customer_id" text,
 	"is_active" boolean DEFAULT true NOT NULL,
@@ -29,7 +30,8 @@ CREATE TABLE "google_oauth_connections" (
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
-	CONSTRAINT "google_oauth_connections_google_user_id_unique" UNIQUE("google_user_id")
+	CONSTRAINT "google_oauth_connections_google_user_id_unique" UNIQUE("google_user_id"),
+	CONSTRAINT "user_email_unique" UNIQUE("user_id","google_email")
 );
 --> statement-breakpoint
 CREATE TABLE "llm_processing_results" (
