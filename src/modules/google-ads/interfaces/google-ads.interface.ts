@@ -22,3 +22,15 @@ export interface IGoogleAdsSearchTerm {
     conversions: number;
   };
 }
+
+export interface ISyncResult {
+  jobId: string;
+  customerId: string;
+  customerName: string;
+  status: 'completed' | 'failed';
+  recordsFetched: number;
+  recordsStored: number;
+  startDate: string;
+  endDate: string;
+  errorMessage?: string;
+}

@@ -12,6 +12,14 @@ export class GoogleAdsService {
 
   constructor(private configService: ConfigService) {}
 
+  private getClient(): GoogleAdsApi {
+    return new GoogleAdsApi({
+      client_id: this.configService.get('GOOGLE_CLIENT_ID')!,
+      client_secret: this.configService.get('GOOGLE_CLIENT_SECRET')!,
+      developer_token: this.configService.get('GOOGLE_ADS_DEVELOPER_TOKEN')!,
+    });
+  }
+
   /**
    * Fetches all accessible Google Ads accounts for authenticated user.
    * Handles both direct accounts and accounts accessible through Manager (MCC) accounts.
@@ -22,20 +30,11 @@ export class GoogleAdsService {
   async getAccessibleAccounts(
     refreshToken: string,
   ): Promise<IGoogleAdsAccount[]> {
-    const client = new GoogleAdsApi({
-      client_id: this.configService.get('GOOGLE_CLIENT_ID'),
-      client_secret: this.configService.get('GOOGLE_CLIENT_SECRET'),
-      developer_token: this.configService.get('GOOGLE_ADS_DEVELOPER_TOKEN'),
-    });
+    const client = this.getClient();
 
     try {
-      // First, get list of accessible customer IDs
-      const tempCustomer = client.Customer({
-        customer_id: '0000000000', // Temporary placeholder
-        refresh_token: refreshToken,
-      });
-
-      const accessibleCustomers = await tempCustomer.listAccessibleCustomers();
+      const accessibleCustomers =
+        await client.listAccessibleCustomers(refreshToken);
 
       if (!accessibleCustomers.resource_names?.length) {
         this.logger.warn('No accessible Google Ads accounts found');
@@ -44,7 +43,6 @@ export class GoogleAdsService {
 
       const accounts: IGoogleAdsAccount[] = [];
 
-      // Fetch details for each accessible account
       for (const resourceName of accessibleCustomers.resource_names) {
         const customerId = resourceName.split('/')[1];
 
@@ -55,7 +53,7 @@ export class GoogleAdsService {
             login_customer_id: customerId,
           });
 
-          const [customerData] = await customerClient.query(`
+          const results = await customerClient.query(`
             SELECT
               customer.id,
               customer.descriptive_name,
@@ -67,6 +65,22 @@ export class GoogleAdsService {
             WHERE customer.id = ${customerId}
             LIMIT 1
           `);
+
+          if (!results.length || !results[0].customer) {
+            this.logger.warn(
+              `No customer data returned for customer ID: ${customerId}`,
+            );
+            continue;
+          }
+
+          const customerData = results[0];
+
+          if (!customerData.customer?.id) {
+            this.logger.warn(
+              `Customer ID missing in response for: ${customerId}`,
+            );
+            continue;
+          }
 
           accounts.push({
             customerId: customerData.customer.id.toString(),
@@ -80,14 +94,13 @@ export class GoogleAdsService {
           });
 
           this.logger.log(
-            `Fetched account: ${customerId} - ${customerData.customer.descriptive_name}`,
+            `Fetched account: ${customerId} - ${customerData.customer.descriptive_name || 'Unnamed'}`,
           );
         } catch (error) {
           this.logger.error(
             `Failed to fetch details for customer ${customerId}`,
             error,
           );
-          // Continue with other accounts even if one fails
         }
       }
 
@@ -116,11 +129,9 @@ export class GoogleAdsService {
     startDate: string,
     endDate: string,
   ): Promise<IGoogleAdsSearchTerm[]> {
-    const client = new GoogleAdsApi({
-      client_id: this.configService.get('GOOGLE_CLIENT_ID'),
-      client_secret: this.configService.get('GOOGLE_CLIENT_SECRET'),
-      developer_token: this.configService.get('GOOGLE_ADS_DEVELOPER_TOKEN'),
-    });
+    this.validateDateRange(startDate, endDate);
+
+    const client = this.getClient();
 
     const customer = client.Customer({
       customer_id: customerId,
@@ -151,20 +162,37 @@ export class GoogleAdsService {
     try {
       const results = await customer.query(query);
 
-      const searchTerms: IGoogleAdsSearchTerm[] = results.map((row) => ({
-        campaignId: row.campaign.id.toString(),
-        campaignName: row.campaign.name,
-        adGroupId: row.ad_group.id.toString(),
-        adGroupName: row.ad_group.name,
-        searchTerm: row.search_term_view.search_term,
-        keyword: row.ad_group_criterion.keyword?.text || '',
-        metrics: {
-          impressions: row.metrics.impressions || 0,
-          clicks: row.metrics.clicks || 0,
-          cost: (row.metrics.cost_micros || 0) / 1_000_000,
-          conversions: row.metrics.conversions || 0,
-        },
-      }));
+      const searchTerms: IGoogleAdsSearchTerm[] = [];
+
+      for (const row of results) {
+        if (
+          !row.campaign ||
+          !row.campaign.id ||
+          !row.ad_group ||
+          !row.ad_group.id ||
+          !row.search_term_view
+        ) {
+          this.logger.warn(
+            `Skipping row with missing required data: ${JSON.stringify(row)}`,
+          );
+          continue;
+        }
+
+        searchTerms.push({
+          campaignId: row.campaign.id.toString(),
+          campaignName: row.campaign.name || 'Unknown Campaign',
+          adGroupId: row.ad_group.id.toString(),
+          adGroupName: row.ad_group.name || 'Unknown Ad Group',
+          searchTerm: row.search_term_view.search_term || '',
+          keyword: row.ad_group_criterion?.keyword?.text || '',
+          metrics: {
+            impressions: row.metrics?.impressions || 0,
+            clicks: row.metrics?.clicks || 0,
+            cost: (row.metrics?.cost_micros || 0) / 1_000_000,
+            conversions: row.metrics?.conversions || 0,
+          },
+        });
+      }
 
       this.logger.log(
         `Fetched ${searchTerms.length} search terms for customer ${customerId} from ${startDate} to ${endDate}`,
@@ -180,12 +208,6 @@ export class GoogleAdsService {
     }
   }
 
-  /**
-   * Helper method to validate date format (YYYY-MM-DD).
-   *
-   * @param date - Date string to validate
-   * @returns true if valid format
-   */
   private isValidDateFormat(date: string): boolean {
     const regex = /^\d{4}-\d{2}-\d{2}$/;
     if (!regex.test(date)) return false;
@@ -194,13 +216,6 @@ export class GoogleAdsService {
     return !isNaN(parsedDate.getTime());
   }
 
-  /**
-   * Validates that date range is valid and not in the future.
-   *
-   * @param startDate - Start date in YYYY-MM-DD format
-   * @param endDate - End date in YYYY-MM-DD format
-   * @throws Error if dates are invalid
-   */
   validateDateRange(startDate: string, endDate: string): void {
     if (!this.isValidDateFormat(startDate)) {
       throw new Error(`Invalid start date format: ${startDate}`);
