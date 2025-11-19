@@ -10,33 +10,44 @@ import { ConfigService } from '@nestjs/config';
 @Injectable()
 export class SupabaseAuthService implements OnModuleInit {
   private readonly logger = new Logger(SupabaseAuthService.name);
-  private supabase: SupabaseClient;
+  private supabaseAdmin: SupabaseClient;
 
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
     const url = this.configService.get<string>('SUPABASE_URL');
-    const anonKey = this.configService.get<string>('SUPABASE_ANON_KEY');
+    const serviceRoleKey = this.configService.get<string>(
+      'SUPABASE_SERVICE_ROLE_KEY',
+    );
 
-    if (!url || !anonKey) {
+    if (!url || !serviceRoleKey) {
       throw new Error('Supabase environment variables are missing');
     }
 
-    this.supabase = createClient(url, anonKey);
+    this.supabaseAdmin = createClient(url, serviceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
   }
 
   async validateUserExists(userId: string) {
-    const { data, error } = await this.supabase.auth.admin.getUserById(userId);
+    const { data, error } =
+      await this.supabaseAdmin.auth.admin.getUserById(userId);
 
     if (error || !data.user) {
-      this.logger.warn(`User validation failed for userId: ${userId}`);
+      this.logger.warn(
+        `User validation failed for userId: ${userId}`,
+        error?.message,
+      );
       throw new NotFoundException(`User ${userId} does not exist`);
     }
 
     return {
       id: data.user.id,
       email: data.user.email,
-      created_at: data.user.created_at,
+      createdAt: data.user.created_at,
     };
   }
 }
