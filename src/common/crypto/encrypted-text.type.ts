@@ -1,17 +1,19 @@
 import { randomBytes, createCipheriv, createDecipheriv } from 'crypto';
 import { customType } from 'drizzle-orm/pg-core';
 
-const keyHex = process.env.CRYPTO_SECRET; // 64 hex chars
-if (!keyHex || keyHex.length !== 64) {
-  throw new Error(
-    'CRYPTO_SECRET must be a 64-character hex string (32 bytes).',
-  );
+function getKey() {
+  const keyHex = process.env.CRYPTO_SECRET;
+  if (!keyHex || keyHex.length !== 64) {
+    throw new Error(
+      'CRYPTO_SECRET must be a 64-character hex string (32 bytes).',
+    );
+  }
+  return Buffer.from(keyHex, 'hex');
 }
 
-const key = Buffer.from(keyHex, 'hex'); // AES-256 key
-
 function encrypt(value: string): string {
-  const iv = randomBytes(12); // Recommended GCM IV length
+  const key = getKey();
+  const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
 
   const encrypted = Buffer.concat([
@@ -19,12 +21,11 @@ function encrypt(value: string): string {
     cipher.final(),
   ]);
   const authTag = cipher.getAuthTag();
-
-  const payload = Buffer.concat([iv, authTag, encrypted]);
-  return payload.toString('base64');
+  return Buffer.concat([iv, authTag, encrypted]).toString('base64');
 }
 
 function decrypt(base64: string): string {
+  const key = getKey();
   const payload = Buffer.from(base64, 'base64');
 
   const iv = payload.slice(0, 12);
@@ -34,11 +35,9 @@ function decrypt(base64: string): string {
   const decipher = createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAuthTag(authTag);
 
-  const decrypted = Buffer.concat([
-    decipher.update(encrypted),
-    decipher.final(),
-  ]);
-  return decrypted.toString('utf8');
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString(
+    'utf8',
+  );
 }
 
 export const encryptedText = customType<{ data: string }>({
