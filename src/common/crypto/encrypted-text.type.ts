@@ -1,9 +1,7 @@
 import { randomBytes, createCipheriv, createDecipheriv } from 'crypto';
 import { customType } from 'drizzle-orm/pg-core';
-import { ConfigService } from '@nestjs/config';
 
-const configService = new ConfigService();
-const keyHex = configService.get<string>('CRYPTO_SECRET'); // 64 hex chars
+const keyHex = process.env.CRYPTO_SECRET; // 64 hex chars
 if (!keyHex || keyHex.length !== 64) {
   throw new Error(
     'CRYPTO_SECRET must be a 64-character hex string (32 bytes).',
