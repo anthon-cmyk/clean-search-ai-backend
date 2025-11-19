@@ -4,8 +4,6 @@ import {
   Query,
   Redirect,
   UnauthorizedException,
-  Req,
-  Request,
 } from '@nestjs/common';
 import { GoogleAuthService } from './google-auth.service';
 
@@ -15,11 +13,9 @@ export class GoogleAuthController {
 
   @Get('authorize')
   @Redirect()
-  authorize(@Req() req: Request) {
-    const userId = req['user']?.id;
-
+  authorize(@Query('userId') userId: string) {
     if (!userId) {
-      throw new UnauthorizedException('User not authenticated');
+      throw new UnauthorizedException('User ID required');
     }
 
     const authUrl = this.googleAuthService.getAuthUrl(userId);
