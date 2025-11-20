@@ -7,6 +7,7 @@ import {
   Get,
   Query,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { SyncSearchTermsDto } from './dto/sync-search-terms.dto';
 import { GoogleAdsSyncService } from './google-ads-sync.service';
@@ -19,7 +20,9 @@ import { GoogleAdsService } from './google-ads.service';
 import { FetchSearchTermsDto } from 'src/dto/fetch-search-terms.dto';
 import type { TAuthenticatedRequest } from 'src/types/authenticated-request.type';
 import { GoogleOauthRepository } from '../google-auth/google-oauth.repository';
+import { SupabaseAuthGuard } from '../supabase/guards/supabase-auth.guard';
 
+@UseGuards(SupabaseAuthGuard)
 @Controller('google-ads')
 export class GoogleAdsController {
   constructor(
@@ -78,7 +81,13 @@ export class GoogleAdsController {
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsAccount[]> {
     const userId = req.user?.id;
-    const refreshToken = req.user?.googleRefreshToken;
+
+    const connection = await this.googleOauthRepo.getLatestActiveConnection(
+      userId!,
+    );
+    if (!connection) throw new UnauthorizedException('Not connected');
+
+    const refreshToken = connection.refreshToken;
 
     if (!userId) {
       throw new UnauthorizedException('User not authenticated');
@@ -106,7 +115,12 @@ export class GoogleAdsController {
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsSearchTerm[]> {
     const userId = req.user?.id;
-    const refreshToken = req.user?.googleRefreshToken;
+    const connection = await this.googleOauthRepo.getLatestActiveConnection(
+      userId!,
+    );
+    if (!connection) throw new UnauthorizedException('Not connected');
+
+    const refreshToken = connection.refreshToken;
 
     if (!userId) {
       throw new UnauthorizedException('User not authenticated');

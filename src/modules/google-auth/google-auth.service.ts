@@ -1,4 +1,10 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { google } from 'googleapis';
 import { OAuth2Client, Credentials } from 'google-auth-library';
 import { ConfigService } from '@nestjs/config';
@@ -15,7 +21,10 @@ export class GoogleAuthService {
   constructor(
     private configService: ConfigService,
     private googleOauthRepo: GoogleOauthRepository,
-    private googleAdsService: GoogleAdsService,
+
+    @Inject(forwardRef(() => GoogleAdsService))
+    private readonly googleAdsService: GoogleAdsService,
+
     private supabaseAuth: SupabaseAuthService,
   ) {
     this.oauth2Client = new google.auth.OAuth2(
