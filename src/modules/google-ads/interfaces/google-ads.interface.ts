@@ -6,6 +6,9 @@ export interface IGoogleAdsAccount {
   timeZone: string;
   isManagerAccount: boolean;
   canManageClients: boolean;
+
+  loginCustomerId: string; // must use in Customer() for auth
+  managerCustomerId?: string | null; // manager that owns this client
 }
 
 export interface IGoogleAdsSearchTerm {

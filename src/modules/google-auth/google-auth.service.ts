@@ -77,13 +77,27 @@ export class GoogleAuthService {
       Date.now() + ((tokens.expiry_date || Date.now() + 3600000) - Date.now()),
     );
 
+    const existingConn = await this.googleOauthRepo.getConnectionByGoogleUserId(
+      userId,
+      userInfo.id,
+    );
+
+    const refreshTokenToUse =
+      tokens.refresh_token ?? existingConn?.refreshToken;
+
+    if (!refreshTokenToUse) {
+      throw new UnauthorizedException(
+        'No refresh token returned. Please revoke access in Google and reconnect.',
+      );
+    }
+
     // Store OAuth connection (delegates to repository)
     const oauthConnection = await this.googleOauthRepo.upsertOAuthConnection({
       userId,
       googleEmail: userInfo.email,
       googleUserId: userInfo.id,
       accessToken: tokens.access_token!,
-      refreshToken: tokens.refresh_token!,
+      refreshToken: refreshTokenToUse,
       tokenExpiresAt,
       scopes: tokens.scope?.split(' ') || [],
       isActive: true,
@@ -105,10 +119,15 @@ export class GoogleAuthService {
         customerId: account.customerId,
         customerName: account.customerName,
         customerDescriptiveName: account.descriptiveName,
-        loginCustomerId: account.customerId,
+
+        loginCustomerId: account.loginCustomerId,
+
         isManagerAccount: account.isManagerAccount,
+        managerCustomerId: account.managerCustomerId ?? null,
+
         currencyCode: account.currencyCode,
         timeZone: account.timeZone,
+
         isActive: true,
       });
     }

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SupabaseAuthService } from '../supabase/supabase-auth.service';
 
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc, gte, lte } from 'drizzle-orm';
 import {
   googleOauthConnections,
   TInsertGoogleOauthConnection,
@@ -36,29 +36,24 @@ export class GoogleOauthRepository {
   ): Promise<TSelectGoogleOauthConnection> {
     await this.supabaseAuth.validateUserExists(data.userId);
 
-    const existing = await this.drizzle.db
-      .select()
-      .from(googleOauthConnections)
-      .where(
-        and(
-          eq(googleOauthConnections.userId, data.userId),
-          eq(googleOauthConnections.googleUserId, data.googleUserId),
-        ),
-      )
-      .limit(1);
+    const existing = await this.getConnectionByGoogleUserId(
+      data.userId,
+      data.googleUserId,
+    );
 
-    if (existing.length > 0) {
+    if (existing) {
       const [updated] = await this.drizzle.db
         .update(googleOauthConnections)
         .set({
           accessToken: data.accessToken,
-          refreshToken: data.refreshToken,
+          // only overwrite if new one exists
+          refreshToken: data.refreshToken ?? existing.refreshToken,
           tokenExpiresAt: data.tokenExpiresAt,
           scopes: data.scopes,
           isActive: true,
           updatedAt: new Date(),
         })
-        .where(eq(googleOauthConnections.id, existing[0].id))
+        .where(eq(googleOauthConnections.id, existing.id))
         .returning();
 
       return updated;
@@ -214,5 +209,133 @@ export class GoogleOauthRepository {
         updatedAt: new Date(),
       })
       .where(eq(googleAdsCustomers.id, adsCustomerId));
+  }
+
+  async getLatestActiveConnection(userId: string) {
+    const [conn] = await this.drizzle.db
+      .select()
+      .from(googleOauthConnections)
+      .where(
+        and(
+          eq(googleOauthConnections.userId, userId),
+          eq(googleOauthConnections.isActive, true),
+        ),
+      )
+      .orderBy(desc(googleOauthConnections.createdAt))
+      .limit(1);
+
+    return conn ?? null;
+  }
+
+  async getConnectionByGoogleUserId(
+    userId: string,
+    googleUserId: string,
+  ): Promise<TSelectGoogleOauthConnection | null> {
+    const [conn] = await this.drizzle.db
+      .select()
+      .from(googleOauthConnections)
+      .where(
+        and(
+          eq(googleOauthConnections.userId, userId),
+          eq(googleOauthConnections.googleUserId, googleUserId),
+        ),
+      )
+      .limit(1);
+
+    return conn ?? null;
+  }
+
+  async getCustomersByUser(userId: string) {
+    // join via oauthConnectionId
+    return this.drizzle.db
+      .select({
+        id: googleAdsCustomers.id,
+        customerId: googleAdsCustomers.customerId,
+        customerName: googleAdsCustomers.customerName,
+        customerDescriptiveName: googleAdsCustomers.customerDescriptiveName,
+        loginCustomerId: googleAdsCustomers.loginCustomerId,
+        isManagerAccount: googleAdsCustomers.isManagerAccount,
+        managerCustomerId: googleAdsCustomers.managerCustomerId,
+        currencyCode: googleAdsCustomers.currencyCode,
+        timeZone: googleAdsCustomers.timeZone,
+        lastSyncedAt: googleAdsCustomers.lastSyncedAt,
+        isActive: googleAdsCustomers.isActive,
+        oauthConnectionId: googleAdsCustomers.oauthConnectionId,
+      })
+      .from(googleAdsCustomers)
+      .innerJoin(
+        googleOauthConnections,
+        eq(googleOauthConnections.id, googleAdsCustomers.oauthConnectionId),
+      )
+      .where(
+        and(
+          eq(googleOauthConnections.userId, userId),
+          eq(googleOauthConnections.isActive, true),
+          eq(googleAdsCustomers.isActive, true),
+        ),
+      )
+      .orderBy(googleAdsCustomers.createdAt);
+  }
+
+  async getSyncJobsByCustomer(userId: string, customerId: string) {
+    const adsCustomer = await this.getCustomerOwnedByUser(userId, customerId);
+    if (!adsCustomer) return [];
+
+    return this.drizzle.db
+      .select()
+      .from(syncJobs)
+      .where(eq(syncJobs.adsCustomerId, adsCustomer.id))
+      .orderBy(desc(syncJobs.createdAt))
+      .limit(50);
+  }
+
+  private async getCustomerOwnedByUser(userId: string, customerId: string) {
+    const [row] = await this.drizzle.db
+      .select({
+        id: googleAdsCustomers.id,
+        customerId: googleAdsCustomers.customerId,
+        loginCustomerId: googleAdsCustomers.loginCustomerId,
+      })
+      .from(googleAdsCustomers)
+      .innerJoin(
+        googleOauthConnections,
+        eq(googleOauthConnections.id, googleAdsCustomers.oauthConnectionId),
+      )
+      .where(
+        and(
+          eq(googleOauthConnections.userId, userId),
+          eq(googleAdsCustomers.customerId, customerId),
+        ),
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async getStoredSearchTerms(
+    userId: string,
+    customerId: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
+    const adsCustomer = await this.getCustomerOwnedByUser(userId, customerId);
+    if (!adsCustomer) return [];
+
+    let whereClause = eq(searchTerms.adsCustomerId, adsCustomer.id);
+
+    if (startDate && endDate) {
+      whereClause = and(
+        whereClause,
+        gte(searchTerms.fetchedAt, new Date(startDate)),
+        lte(searchTerms.fetchedAt, new Date(endDate)),
+      )!;
+    }
+
+    return this.drizzle.db
+      .select()
+      .from(searchTerms)
+      .where(whereClause)
+      .orderBy(desc(searchTerms.fetchedAt))
+      .limit(10000);
   }
 }

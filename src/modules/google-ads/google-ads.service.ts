@@ -20,95 +20,94 @@ export class GoogleAdsService {
     });
   }
 
-  /**
-   * Fetches all accessible Google Ads accounts for authenticated user.
-   * Handles both direct accounts and accounts accessible through Manager (MCC) accounts.
-   *
-   * @param refreshToken - OAuth refresh token for authentication
-   * @returns Array of accessible Google Ads customer accounts with metadata
-   */
   async getAccessibleAccounts(
     refreshToken: string,
   ): Promise<IGoogleAdsAccount[]> {
     const client = this.getClient();
 
-    try {
-      const accessibleCustomers =
-        await client.listAccessibleCustomers(refreshToken);
+    const accessible = await client.listAccessibleCustomers(refreshToken);
+    const resourceNames = accessible.resource_names ?? [];
+    if (!resourceNames.length) return [];
 
-      if (!accessibleCustomers.resource_names?.length) {
-        this.logger.warn('No accessible Google Ads accounts found');
-        return [];
-      }
-
-      const accounts: IGoogleAdsAccount[] = [];
-
-      for (const resourceName of accessibleCustomers.resource_names) {
+    // Pass 1: fetch metadata about every accessible customer
+    const metas = await Promise.all(
+      resourceNames.map(async (resourceName) => {
         const customerId = resourceName.split('/')[1];
 
         try {
           const customerClient = client.Customer({
             customer_id: customerId,
             refresh_token: refreshToken,
-            login_customer_id: customerId,
+            login_customer_id: customerId, // safe for metadata query
           });
 
-          const results = await customerClient.query(`
-            SELECT
-              customer.id,
-              customer.descriptive_name,
-              customer.currency_code,
-              customer.time_zone,
-              customer.manager,
-              customer.test_account
-            FROM customer
-            WHERE customer.id = ${customerId}
-            LIMIT 1
-          `);
+          const [row] = await customerClient.query(`
+          SELECT
+            customer.id,
+            customer.descriptive_name,
+            customer.currency_code,
+            customer.time_zone,
+            customer.manager
+          FROM customer
+          WHERE customer.id = ${customerId}
+          LIMIT 1
+        `);
 
-          if (!results.length || !results[0].customer) {
-            this.logger.warn(
-              `No customer data returned for customer ID: ${customerId}`,
-            );
-            continue;
-          }
+          const c = row?.customer;
+          if (!c?.id) return null;
 
-          const customerData = results[0];
-
-          if (!customerData.customer?.id) {
-            this.logger.warn(
-              `Customer ID missing in response for: ${customerId}`,
-            );
-            continue;
-          }
-
-          accounts.push({
-            customerId: customerData.customer.id.toString(),
-            customerName: customerData.customer.descriptive_name || 'Unnamed',
-            descriptiveName:
-              customerData.customer.descriptive_name || 'Unnamed',
-            currencyCode: customerData.customer.currency_code || 'USD',
-            timeZone: customerData.customer.time_zone || 'UTC',
-            isManagerAccount: customerData.customer.manager || false,
-            canManageClients: customerData.customer.manager || false,
-          });
-
-          this.logger.log(
-            `Fetched account: ${customerId} - ${customerData.customer.descriptive_name || 'Unnamed'}`,
-          );
-        } catch (error) {
-          this.logger.error(
-            `Failed to fetch details for customer ${customerId}`,
-            error,
-          );
+          return {
+            customerId: c.id.toString(),
+            descriptiveName: c.descriptive_name || 'Unnamed',
+            customerName: c.descriptive_name || 'Unnamed',
+            currencyCode: c.currency_code || 'USD',
+            timeZone: c.time_zone || 'UTC',
+            isManagerAccount: !!c.manager,
+          };
+        } catch (e) {
+          this.logger.error(`Failed metadata for ${customerId}`, e);
+          return null;
         }
-      }
+      }),
+    );
 
-      return accounts;
-    } catch (error) {
-      this.logger.error('Failed to fetch accessible accounts', error);
-      throw error;
-    }
+    const customers = metas.filter(Boolean) as Array<{
+      customerId: string;
+      descriptiveName: string;
+      customerName: string;
+      currencyCode: string;
+      timeZone: string;
+      isManagerAccount: boolean;
+    }>;
+
+    // Identify manager IDs the user can access
+    const managerIds = customers
+      .filter((c) => c.isManagerAccount)
+      .map((c) => c.customerId);
+
+    // MVP rule: pick a single manager ID to act as login_customer_id
+    // If user has multiple MCCs, UI can later allow selection.
+    const fallbackManagerId = managerIds[0] ?? null;
+
+    // Pass 2: attach loginCustomerId + managerCustomerId
+    return customers.map((c) => {
+      const loginCustomerId = c.isManagerAccount
+        ? c.customerId
+        : (fallbackManagerId ?? c.customerId);
+
+      return {
+        customerId: c.customerId,
+        customerName: c.customerName,
+        descriptiveName: c.descriptiveName,
+        currencyCode: c.currencyCode,
+        timeZone: c.timeZone,
+        isManagerAccount: c.isManagerAccount,
+        canManageClients: c.isManagerAccount,
+
+        loginCustomerId,
+        managerCustomerId: c.isManagerAccount ? null : fallbackManagerId,
+      };
+    });
   }
 
   /**

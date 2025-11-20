@@ -5,6 +5,8 @@ import {
   Req,
   UnauthorizedException,
   Get,
+  Query,
+  BadRequestException,
 } from '@nestjs/common';
 import { SyncSearchTermsDto } from './dto/sync-search-terms.dto';
 import { GoogleAdsSyncService } from './google-ads-sync.service';
@@ -16,13 +18,53 @@ import {
 import { GoogleAdsService } from './google-ads.service';
 import { FetchSearchTermsDto } from 'src/dto/fetch-search-terms.dto';
 import type { TAuthenticatedRequest } from 'src/types/authenticated-request.type';
+import { GoogleOauthRepository } from '../google-auth/google-oauth.repository';
 
 @Controller('google-ads')
 export class GoogleAdsController {
   constructor(
     private googleAdsSyncService: GoogleAdsSyncService,
     private googleAdsService: GoogleAdsService,
+    private googleOauthRepo: GoogleOauthRepository,
   ) {}
+
+  @Get('customers')
+  async getCustomers(@Req() req: TAuthenticatedRequest) {
+    const userId = req.user?.id;
+    if (!userId) throw new UnauthorizedException();
+    return this.googleOauthRepo.getCustomersByUser(userId);
+  }
+
+  @Get('sync-jobs')
+  async getSyncJobs(
+    @Req() req: TAuthenticatedRequest,
+    @Query('customerId') customerId: string,
+  ) {
+    const userId = req.user?.id;
+    if (!userId) throw new UnauthorizedException();
+    if (!customerId) throw new BadRequestException('customerId required');
+
+    return this.googleOauthRepo.getSyncJobsByCustomer(userId, customerId);
+  }
+
+  @Get('search-terms/stored')
+  async getStoredTerms(
+    @Req() req: TAuthenticatedRequest,
+    @Query('customerId') customerId: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const userId = req.user?.id;
+    if (!userId) throw new UnauthorizedException();
+    if (!customerId) throw new BadRequestException('customerId required');
+
+    return this.googleOauthRepo.getStoredSearchTerms(
+      userId,
+      customerId,
+      startDate,
+      endDate,
+    );
+  }
 
   /**
    * Retrieves all accessible Google Ads accounts for the authenticated user.
@@ -58,9 +100,9 @@ export class GoogleAdsController {
    * @returns Array of search term records with campaign, ad group, keyword, and performance metrics
    * @throws UnauthorizedException if user is not authenticated or missing refresh token
    */
-  @Post('search-terms')
+  @Get('search-terms')
   async fetchSearchTerms(
-    @Body() dto: FetchSearchTermsDto,
+    @Query() dto: FetchSearchTermsDto,
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsSearchTerm[]> {
     const userId = req.user?.id;
