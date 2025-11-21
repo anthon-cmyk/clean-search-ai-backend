@@ -43,8 +43,8 @@ export class GoogleAuthService {
   getAuthUrl(userId: string): string {
     const scopes = [
       'https://www.googleapis.com/auth/adwords',
-      'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/userinfo.profile',
+      'openid',
+      'email',
     ];
 
     return this.oauth2Client.generateAuthUrl({
