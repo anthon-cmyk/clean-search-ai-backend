@@ -48,6 +48,7 @@ export class GoogleAdsService {
             customer.currency_code,
             customer.time_zone,
             customer.manager
+            customer.test_account
           FROM customer
           WHERE customer.id = ${customerId}
           LIMIT 1
@@ -145,7 +146,6 @@ export class GoogleAdsService {
         ad_group.id,
         ad_group.name,
         search_term_view.search_term,
-        ad_group_criterion.keyword.text,
         metrics.impressions,
         metrics.clicks,
         metrics.cost_micros,

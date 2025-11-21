@@ -115,6 +115,10 @@ export class GoogleAdsController {
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsSearchTerm[]> {
     const userId = req.user?.id;
+    console.log(
+      '🚀 ~ GoogleAdsController ~ fetchSearchTerms ~ userId:',
+      userId,
+    );
     const connection = await this.googleOauthRepo.getLatestActiveConnection(
       userId!,
     );
