@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsOptional } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class FetchCampaignsDto {
@@ -16,12 +16,11 @@ export class FetchCampaignsDto {
   @IsOptional()
   endDate?: string;
 
-  @IsBoolean()
-  @IsOptional()
   @Transform(({ value }) => {
-    if (value === 'true') return true;
-    if (value === 'false') return false;
-    return value;
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return undefined;
   })
+  @IsOptional()
   includeAdGroups?: boolean;
 }
