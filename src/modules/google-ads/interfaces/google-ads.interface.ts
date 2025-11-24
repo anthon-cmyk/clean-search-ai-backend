@@ -1,3 +1,5 @@
+import { enums } from 'google-ads-api';
+
 export interface IGoogleAdsAccount {
   customerId: string;
   customerName: string;
@@ -18,7 +20,7 @@ export interface IGoogleAdsSearchTerm {
   adGroupName: string;
   searchTerm: string;
   keyword: string;
-  matchType: string;
+  matchType: enums.KeywordMatchType | string;
   metrics: {
     impressions: number;
     clicks: number;
@@ -31,14 +33,14 @@ export interface IGoogleAdsSearchTerm {
 export interface IGoogleAdsCampaign {
   campaignId: string;
   campaignName: string;
-  status: string;
-  biddingStrategyType: string;
-  budgetAmountMicros: number;
+  status: enums.CampaignStatus | string;
+  biddingStrategyType: enums.BiddingStrategyType | string;
+  budgetAmountMicros: enums.AdvertisingChannelType | number;
   budgetAmount: number;
   currencyCode: string;
   startDate: string;
   endDate?: string;
-  advertisingChannelType: string;
+  advertisingChannelType: enums.AdvertisingChannelType | string;
   metrics: {
     impressions: number;
     clicks: number;

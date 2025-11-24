@@ -3,6 +3,7 @@ import { GoogleAdsApi } from 'google-ads-api';
 import { ConfigService } from '@nestjs/config';
 import {
   IGoogleAdsAccount,
+  IGoogleAdsCampaign,
   IGoogleAdsSearchTerm,
 } from './interfaces/google-ads.interface';
 
@@ -227,6 +228,133 @@ export class GoogleAdsService {
     } catch (error) {
       this.logger.error(
         `Failed to fetch search terms for customer ${customerId}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Fetches all campaigns for a specific Google Ads customer account.
+   *
+   * Without date range: Returns campaign metadata only (lightweight, fast).
+   * With date range: Includes performance metrics for the specified period.
+   *
+   * @param customerId - Google Ads customer ID (without hyphens)
+   * @param loginCustomerId - Login customer ID (for MCC accounts, use manager ID)
+   * @param refreshToken - OAuth refresh token for authentication
+   * @param startDate - Optional start date in YYYY-MM-DD format for metrics
+   * @param endDate - Optional end date in YYYY-MM-DD format for metrics
+   *
+   * @returns Array of campaign objects containing metadata and optional performance metrics
+   *
+   * @throws Error if API query fails or date validation fails
+   */
+  async fetchCampaigns(
+    customerId: string,
+    loginCustomerId: string,
+    refreshToken: string,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<IGoogleAdsCampaign[]> {
+    if (startDate && endDate) {
+      this.validateDateRange(startDate, endDate);
+    }
+
+    const client = this.getClient();
+
+    const customer = client.Customer({
+      customer_id: customerId,
+      refresh_token: refreshToken,
+      login_customer_id: loginCustomerId,
+    });
+
+    const hasDateRange = Boolean(startDate && endDate);
+
+    const metricsFields = hasDateRange
+      ? `,
+      metrics.impressions,
+      metrics.clicks,
+      metrics.cost_micros,
+      metrics.conversions,
+      metrics.conversions_value,
+      metrics.ctr,
+      metrics.average_cpc,
+      metrics.average_cpm`
+      : '';
+
+    const whereClause = hasDateRange
+      ? `WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'`
+      : '';
+
+    const query = `
+    SELECT
+      campaign.id,
+      campaign.name,
+      campaign.status,
+      campaign.bidding_strategy_type,
+      campaign.advertising_channel_type,
+      campaign_budget.amount_micros,
+      customer.currency_code,
+      campaign.start_date,
+      campaign.end_date${metricsFields}
+    FROM campaign
+    ${whereClause}
+    ORDER BY campaign.name ASC
+  `;
+
+    try {
+      const results = await customer.query(query);
+
+      const campaigns: IGoogleAdsCampaign[] = [];
+
+      for (const row of results) {
+        if (!row.campaign || !row.campaign.id) {
+          this.logger.warn(
+            `Skipping campaign row with missing required data: ${JSON.stringify(row)}`,
+          );
+          continue;
+        }
+
+        const budgetMicros = row.campaign_budget?.amount_micros || 0;
+
+        campaigns.push({
+          campaignId: `${row.campaign.id}`,
+          campaignName: row.campaign.name || 'Unknown Campaign',
+          status: row.campaign.status || 'UNKNOWN',
+          biddingStrategyType: row.campaign.bidding_strategy_type || 'UNKNOWN',
+          advertisingChannelType:
+            row.campaign.advertising_channel_type || 'UNKNOWN',
+          budgetAmountMicros: budgetMicros,
+          budgetAmount: budgetMicros / 1_000_000,
+          currencyCode: row.customer?.currency_code || 'USD',
+          startDate: row.campaign.start_date || '',
+          endDate: row.campaign.end_date || undefined,
+          metrics: {
+            impressions: row.metrics?.impressions || 0,
+            clicks: row.metrics?.clicks || 0,
+            cost: (row.metrics?.cost_micros || 0) / 1_000_000,
+            conversions: row.metrics?.conversions || 0,
+            conversionsValue: row.metrics?.conversions_value || 0,
+            ctr: row.metrics?.ctr || 0,
+            averageCpc: (row.metrics?.average_cpc || 0) / 1_000_000,
+            averageCpm: (row.metrics?.average_cpm || 0) / 1_000_000,
+          },
+        });
+      }
+
+      const dateRangeLog = hasDateRange
+        ? ` with metrics from ${startDate} to ${endDate}`
+        : ' (metadata only)';
+
+      this.logger.log(
+        `Fetched ${campaigns.length} campaigns for customer ${customerId}${dateRangeLog}`,
+      );
+
+      return campaigns;
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch campaigns for customer ${customerId}`,
         error,
       );
       throw error;

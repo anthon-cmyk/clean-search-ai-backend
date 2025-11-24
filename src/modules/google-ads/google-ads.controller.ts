@@ -13,6 +13,7 @@ import { SyncSearchTermsDto } from './dto/sync-search-terms.dto';
 import { GoogleAdsSyncService } from './google-ads-sync.service';
 import {
   IGoogleAdsAccount,
+  IGoogleAdsCampaign,
   IGoogleAdsSearchTerm,
   ISyncResult,
 } from './interfaces/google-ads.interface';
@@ -21,6 +22,7 @@ import { FetchSearchTermsDto } from 'src/dto/fetch-search-terms.dto';
 import type { TAuthenticatedRequest } from 'src/types/authenticated-request.type';
 import { GoogleOauthRepository } from '../google-auth/google-oauth.repository';
 import { SupabaseAuthGuard } from '../supabase/guards/supabase-auth.guard';
+import { FetchCampaignsDto } from 'src/dto/fetch-campaigns.dto';
 
 @UseGuards(SupabaseAuthGuard)
 @Controller('google-ads')
@@ -144,6 +146,52 @@ export class GoogleAdsController {
       dto.endDate,
       dto.campaignId,
       dto.adGroupId,
+    );
+  }
+
+  /**
+   * Retrieves all campaigns for a specific Google Ads customer account.
+   *
+   * Without date range parameters: Returns campaign metadata only (fast, lightweight).
+   * With date range parameters: Includes performance metrics for the specified period.
+   *
+   * @returns Array of campaign objects with metadata and optional performance data
+   *
+   * @throws UnauthorizedException if user is not authenticated or refresh token is missing
+   * @throws BadRequestException if date range validation fails
+   */
+  @Get('campaigns')
+  async fetchCampaigns(
+    @Query() dto: FetchCampaignsDto,
+    @Req() req: TAuthenticatedRequest,
+  ): Promise<IGoogleAdsCampaign[]> {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    const connection =
+      await this.googleOauthRepo.getLatestActiveConnection(userId);
+
+    if (!connection) {
+      throw new UnauthorizedException('Not connected');
+    }
+
+    const refreshToken = connection.refreshToken;
+
+    if (!refreshToken) {
+      throw new UnauthorizedException(
+        'Google Ads account not connected. Please connect your Google Ads account first.',
+      );
+    }
+
+    return this.googleAdsService.fetchCampaigns(
+      dto.customerId,
+      dto.loginCustomerId,
+      refreshToken,
+      dto.startDate,
+      dto.endDate,
     );
   }
 
