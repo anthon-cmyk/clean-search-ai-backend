@@ -105,6 +105,7 @@ export class GoogleAdsController {
   /**
    * Fetches search terms data from Google Ads for a specific customer account and date range.
    * Returns the actual search queries users typed that triggered ads.
+   * Optionally filter by campaign ID and/or ad group ID.
    *
    * @returns Array of search term records with campaign, ad group, keyword, and performance metrics
    * @throws UnauthorizedException if user is not authenticated or missing refresh token
@@ -115,20 +116,19 @@ export class GoogleAdsController {
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsSearchTerm[]> {
     const userId = req.user?.id;
-    console.log(
-      '🚀 ~ GoogleAdsController ~ fetchSearchTerms ~ userId:',
-      userId,
-    );
-    const connection = await this.googleOauthRepo.getLatestActiveConnection(
-      userId!,
-    );
-    if (!connection) throw new UnauthorizedException('Not connected');
-
-    const refreshToken = connection.refreshToken;
 
     if (!userId) {
       throw new UnauthorizedException('User not authenticated');
     }
+
+    const connection =
+      await this.googleOauthRepo.getLatestActiveConnection(userId);
+
+    if (!connection) {
+      throw new UnauthorizedException('Not connected');
+    }
+
+    const refreshToken = connection.refreshToken;
 
     if (!refreshToken) {
       throw new UnauthorizedException(
@@ -142,6 +142,8 @@ export class GoogleAdsController {
       refreshToken,
       dto.startDate,
       dto.endDate,
+      dto.campaignId,
+      dto.adGroupId,
     );
   }
 

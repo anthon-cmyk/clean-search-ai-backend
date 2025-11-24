@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, Matches } from 'class-validator';
+import { IsString, IsNotEmpty, Matches, IsOptional } from 'class-validator';
 
 export class FetchSearchTermsDto {
   @IsString()
@@ -8,6 +8,14 @@ export class FetchSearchTermsDto {
   @IsString()
   @IsNotEmpty()
   loginCustomerId: string;
+
+  @IsOptional()
+  @IsString()
+  campaignId?: string;
+
+  @IsOptional()
+  @IsString()
+  adGroupId?: string;
 
   @IsString()
   @IsNotEmpty()

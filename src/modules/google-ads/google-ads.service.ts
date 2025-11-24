@@ -47,7 +47,7 @@ export class GoogleAdsService {
             customer.descriptive_name,
             customer.currency_code,
             customer.time_zone,
-            customer.manager
+            customer.manager,
             customer.test_account
           FROM customer
           WHERE customer.id = ${customerId}
@@ -120,6 +120,8 @@ export class GoogleAdsService {
    * @param refreshToken - OAuth refresh token
    * @param startDate - Start date in YYYY-MM-DD format
    * @param endDate - End date in YYYY-MM-DD format
+   * @param campaignId - Optional campaign ID to filter results
+   * @param adGroupId - Optional ad group ID to filter results
    * @returns Array of search term records with campaign/adgroup/keyword data
    */
   async fetchSearchTerms(
@@ -128,6 +130,8 @@ export class GoogleAdsService {
     refreshToken: string,
     startDate: string,
     endDate: string,
+    campaignId?: string,
+    adGroupId?: string,
   ): Promise<IGoogleAdsSearchTerm[]> {
     this.validateDateRange(startDate, endDate);
 
@@ -139,24 +143,39 @@ export class GoogleAdsService {
       login_customer_id: loginCustomerId,
     });
 
+    const whereConditions = [
+      `segments.date BETWEEN '${startDate}' AND '${endDate}'`,
+      `campaign.status = 'ENABLED'`,
+      `ad_group.status = 'ENABLED'`,
+    ];
+
+    if (campaignId) {
+      whereConditions.push(`campaign.id = ${campaignId}`);
+    }
+
+    if (adGroupId) {
+      whereConditions.push(`ad_group.id = ${adGroupId}`);
+    }
+
     const query = `
-      SELECT
-        campaign.id,
-        campaign.name,
-        ad_group.id,
-        ad_group.name,
-        search_term_view.search_term,
-        metrics.impressions,
-        metrics.clicks,
-        metrics.cost_micros,
-        metrics.conversions
-      FROM search_term_view
-      WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
-        AND campaign.status = 'ENABLED'
-        AND ad_group.status = 'ENABLED'
-      ORDER BY metrics.impressions DESC
-      LIMIT 10000
-    `;
+    SELECT
+      campaign.id,
+      campaign.name,
+      ad_group.id,
+      ad_group.name,
+      search_term_view.search_term,
+      ad_group_criterion.keyword.text,
+      ad_group_criterion.keyword.match_type,
+      metrics.impressions,
+      metrics.clicks,
+      metrics.cost_micros,
+      metrics.conversions,
+      metrics.conversions_value
+    FROM search_term_view
+    WHERE ${whereConditions.join(' AND ')}
+    ORDER BY metrics.impressions DESC
+    LIMIT 10000
+  `;
 
     try {
       const results = await customer.query(query);
@@ -184,17 +203,24 @@ export class GoogleAdsService {
           adGroupName: row.ad_group.name || 'Unknown Ad Group',
           searchTerm: row.search_term_view.search_term || '',
           keyword: row.ad_group_criterion?.keyword?.text || '',
+          matchType:
+            (row.ad_group_criterion?.keyword?.match_type as string) || '',
           metrics: {
             impressions: row.metrics?.impressions || 0,
             clicks: row.metrics?.clicks || 0,
             cost: (row.metrics?.cost_micros || 0) / 1_000_000,
             conversions: row.metrics?.conversions || 0,
+            conversionsValue: row.metrics?.conversions_value || 0,
           },
         });
       }
 
+      const filterDesc = campaignId
+        ? `for campaign ${campaignId}`
+        : 'across all campaigns';
+
       this.logger.log(
-        `Fetched ${searchTerms.length} search terms for customer ${customerId} from ${startDate} to ${endDate}`,
+        `Fetched ${searchTerms.length} search terms ${filterDesc} for customer ${customerId} from ${startDate} to ${endDate}`,
       );
 
       return searchTerms;

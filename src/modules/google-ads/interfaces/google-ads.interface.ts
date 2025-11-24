@@ -18,11 +18,36 @@ export interface IGoogleAdsSearchTerm {
   adGroupName: string;
   searchTerm: string;
   keyword: string;
+  matchType: string;
   metrics: {
     impressions: number;
     clicks: number;
     cost: number;
     conversions: number;
+    conversionsValue: number;
+  };
+}
+
+export interface IGoogleAdsCampaign {
+  campaignId: string;
+  campaignName: string;
+  status: string;
+  biddingStrategyType: string;
+  budgetAmountMicros: number;
+  budgetAmount: number;
+  currencyCode: string;
+  startDate: string;
+  endDate?: string;
+  advertisingChannelType: string;
+  metrics: {
+    impressions: number;
+    clicks: number;
+    cost: number;
+    conversions: number;
+    conversionsValue: number;
+    ctr: number;
+    averageCpc: number;
+    averageCpm: number;
   };
 }
 
