@@ -38,6 +38,39 @@ export class GoogleAdsController {
     private googleOauthRepo: GoogleOauthRepository,
   ) {}
 
+  /**
+   * Extracts and validates refresh token for the authenticated user
+   *
+   * @returns Object containing userId and refreshToken
+   * @throws UnauthorizedException if user is not authenticated or token is missing
+   */
+  private async getAuthenticatedUserToken(
+    req: TAuthenticatedRequest,
+  ): Promise<{ userId: string; refreshToken: string }> {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    const connection =
+      await this.googleOauthRepo.getLatestActiveConnection(userId);
+
+    if (!connection) {
+      throw new UnauthorizedException('Google account not connected');
+    }
+
+    const refreshToken = connection.refreshToken;
+
+    if (!refreshToken) {
+      throw new UnauthorizedException(
+        'Google Ads account not connected. Please connect your Google Ads account first.',
+      );
+    }
+
+    return { userId, refreshToken };
+  }
+
   @Get('customers')
   async getCustomers(@Req() req: TAuthenticatedRequest) {
     const userId = req.user?.id;
@@ -87,25 +120,7 @@ export class GoogleAdsController {
   async getAccessibleAccounts(
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsAccount[]> {
-    const userId = req.user?.id;
-
-    const connection = await this.googleOauthRepo.getLatestActiveConnection(
-      userId!,
-    );
-    if (!connection) throw new UnauthorizedException('Not connected');
-
-    const refreshToken = connection.refreshToken;
-
-    if (!userId) {
-      throw new UnauthorizedException('User not authenticated');
-    }
-
-    if (!refreshToken) {
-      throw new UnauthorizedException(
-        'Google Ads account not connected. Please connect your Google Ads account first.',
-      );
-    }
-
+    const { refreshToken } = await this.getAuthenticatedUserToken(req);
     return this.googleAdsService.getAccessibleAccounts(refreshToken);
   }
 
@@ -120,26 +135,7 @@ export class GoogleAdsController {
     @Param('mccCustomerId') mccCustomerId: string,
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsAccount[]> {
-    const userId = req.user?.id;
-
-    if (!userId) {
-      throw new UnauthorizedException('User not authenticated');
-    }
-
-    const connection =
-      await this.googleOauthRepo.getLatestActiveConnection(userId);
-
-    if (!connection) {
-      throw new UnauthorizedException('Not connected');
-    }
-
-    const refreshToken = connection.refreshToken;
-
-    if (!refreshToken) {
-      throw new UnauthorizedException(
-        'Google Ads account not connected. Please connect your Google Ads account first.',
-      );
-    }
+    const { refreshToken } = await this.getAuthenticatedUserToken(req);
 
     return this.googleAdsService.getManagedAccounts(
       mccCustomerId,
@@ -160,26 +156,7 @@ export class GoogleAdsController {
     @Query() dto: FetchSearchTermsDto,
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsSearchTerm[]> {
-    const userId = req.user?.id;
-
-    if (!userId) {
-      throw new UnauthorizedException('User not authenticated');
-    }
-
-    const connection =
-      await this.googleOauthRepo.getLatestActiveConnection(userId);
-
-    if (!connection) {
-      throw new UnauthorizedException('Not connected');
-    }
-
-    const refreshToken = connection.refreshToken;
-
-    if (!refreshToken) {
-      throw new UnauthorizedException(
-        'Google Ads account not connected. Please connect your Google Ads account first.',
-      );
-    }
+    const { refreshToken } = await this.getAuthenticatedUserToken(req);
 
     return this.googleAdsService.fetchSearchTerms(
       dto.customerId,
@@ -197,8 +174,9 @@ export class GoogleAdsController {
    *
    * Without date range parameters: Returns campaign metadata only (fast, lightweight).
    * With date range parameters: Includes performance metrics for the specified period.
+   * With includeAdGroups=true: Fetches and includes all ad groups within each campaign.
    *
-   * @returns Array of campaign objects with metadata and optional performance data
+   * @returns Array of campaign objects with metadata, optional performance data, and optional ad groups
    *
    * @throws UnauthorizedException if user is not authenticated or refresh token is missing
    * @throws BadRequestException if date range validation fails
@@ -208,33 +186,16 @@ export class GoogleAdsController {
     @Query() dto: FetchCampaignsDto,
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsCampaign[]> {
-    const userId = req.user?.id;
+    console.log('🚀 ~ GoogleAdsController ~ fetchCampaigns ~ dto:', dto);
+    const { refreshToken } = await this.getAuthenticatedUserToken(req);
 
-    if (!userId) {
-      throw new UnauthorizedException('User not authenticated');
-    }
-
-    const connection =
-      await this.googleOauthRepo.getLatestActiveConnection(userId);
-
-    if (!connection) {
-      throw new UnauthorizedException('Not connected');
-    }
-
-    const refreshToken = connection.refreshToken;
-
-    if (!refreshToken) {
-      throw new UnauthorizedException(
-        'Google Ads account not connected. Please connect your Google Ads account first.',
-      );
-    }
-
-    return this.googleAdsService.fetchCampaigns(
+    return this.googleAdsService.fetchCampaignsWithAdGroups(
       dto.customerId,
       dto.loginCustomerId,
       refreshToken,
       dto.startDate,
       dto.endDate,
+      dto.includeAdGroups || true,
     );
   }
 
@@ -281,26 +242,7 @@ export class GoogleAdsController {
     @Query() dto: FetchAdGroupsDto,
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsAdGroup[]> {
-    const userId = req.user?.id;
-
-    if (!userId) {
-      throw new UnauthorizedException('User not authenticated');
-    }
-
-    const connection =
-      await this.googleOauthRepo.getLatestActiveConnection(userId);
-
-    if (!connection) {
-      throw new UnauthorizedException('Not connected');
-    }
-
-    const refreshToken = connection.refreshToken;
-
-    if (!refreshToken) {
-      throw new UnauthorizedException(
-        'Google Ads account not connected. Please connect your Google Ads account first.',
-      );
-    }
+    const { refreshToken } = await this.getAuthenticatedUserToken(req);
 
     return this.googleAdsService.fetchAdGroups(
       dto.customerId,
@@ -328,26 +270,7 @@ export class GoogleAdsController {
     @Query() dto: FetchKeywordsDto,
     @Req() req: TAuthenticatedRequest,
   ): Promise<IGoogleAdsKeyword[]> {
-    const userId = req.user?.id;
-
-    if (!userId) {
-      throw new UnauthorizedException('User not authenticated');
-    }
-
-    const connection =
-      await this.googleOauthRepo.getLatestActiveConnection(userId);
-
-    if (!connection) {
-      throw new UnauthorizedException('Not connected');
-    }
-
-    const refreshToken = connection.refreshToken;
-
-    if (!refreshToken) {
-      throw new UnauthorizedException(
-        'Google Ads account not connected. Please connect your Google Ads account first.',
-      );
-    }
+    const { refreshToken } = await this.getAuthenticatedUserToken(req);
 
     return this.googleAdsService.fetchKeywords(
       dto.customerId,

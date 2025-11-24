@@ -1,4 +1,5 @@
-import { IsString, IsOptional, Matches } from 'class-validator';
+import { IsString, IsOptional, IsBoolean } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class FetchCampaignsDto {
   @IsString()
@@ -7,17 +8,20 @@ export class FetchCampaignsDto {
   @IsString()
   loginCustomerId: string;
 
-  @IsOptional()
   @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'startDate must be in YYYY-MM-DD format',
-  })
+  @IsOptional()
   startDate?: string;
 
-  @IsOptional()
   @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'endDate must be in YYYY-MM-DD format',
-  })
+  @IsOptional()
   endDate?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  includeAdGroups?: boolean;
 }

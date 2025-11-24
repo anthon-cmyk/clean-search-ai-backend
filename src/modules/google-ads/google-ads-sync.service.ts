@@ -3,6 +3,7 @@ import { GoogleAdsService } from './google-ads.service';
 import { GoogleOauthRepository } from '../google-auth/google-oauth.repository';
 import { TInsertSearchTerm } from '../../drizzle/schema/search-terms.schema';
 import { ISyncResult } from './interfaces/google-ads.interface';
+import { TSelectGoogleAdsCustomer } from 'src/drizzle/schema';
 
 @Injectable()
 export class GoogleAdsSyncService {
@@ -29,24 +30,13 @@ export class GoogleAdsSyncService {
     startDate: string,
     endDate: string,
   ): Promise<ISyncResult> {
-    const connections =
-      await this.googleOauthRepo.getActiveConnectionsByUser(userId);
+    const adsCustomer = await this.ensureCustomerExists(userId, customerId);
 
-    if (connections.length === 0) {
-      throw new NotFoundException('No active Google OAuth connections found');
-    }
+    const connection =
+      await this.googleOauthRepo.getLatestActiveConnection(userId);
 
-    const connection = connections[0];
-
-    const adsCustomer = await this.googleOauthRepo.getAdsCustomerByCustomerId(
-      customerId,
-      connection.id,
-    );
-
-    if (!adsCustomer) {
-      throw new NotFoundException(
-        `Google Ads customer ${customerId} not found for this user`,
-      );
+    if (!connection) {
+      throw new NotFoundException('No active Google OAuth connection found');
     }
 
     const syncJob = await this.googleOauthRepo.createSyncJob({
@@ -154,5 +144,64 @@ export class GoogleAdsSyncService {
         errorMessage: error.message,
       };
     }
+  }
+
+  /**
+   * Ensures Google Ads customer exists in database.
+   * Creates or updates the customer record.
+   *
+   * @returns Database customer record
+   */
+  async ensureCustomerExists(
+    userId: string,
+    customerId: string,
+  ): Promise<TSelectGoogleAdsCustomer> {
+    const connection =
+      await this.googleOauthRepo.getLatestActiveConnection(userId);
+
+    if (!connection) {
+      throw new NotFoundException('No active Google OAuth connection found');
+    }
+
+    let adsCustomer = await this.googleOauthRepo.getAdsCustomerByCustomerId(
+      customerId,
+      connection.id,
+    );
+
+    if (adsCustomer) {
+      this.logger.log(`Customer ${customerId} already exists in database`);
+      return adsCustomer;
+    }
+
+    this.logger.log(`Fetching metadata for new customer ${customerId}`);
+
+    const accounts = await this.googleAdsService.getAccessibleAccounts(
+      connection.refreshToken,
+    );
+
+    const account = accounts.find((a) => a.customerId === customerId);
+
+    if (!account) {
+      throw new NotFoundException(
+        `Customer ${customerId} not found in accessible accounts`,
+      );
+    }
+
+    adsCustomer = await this.googleOauthRepo.createAdsCustomer({
+      oauthConnectionId: connection.id,
+      customerId: account.customerId,
+      customerName: account.customerName,
+      customerDescriptiveName: account.descriptiveName,
+      loginCustomerId: account.loginCustomerId,
+      isManagerAccount: account.isManagerAccount,
+      managerCustomerId: account.managerCustomerId ?? null,
+      currencyCode: account.currencyCode,
+      timeZone: account.timeZone,
+      isActive: true,
+    });
+
+    this.logger.log(`Created customer ${customerId} in database`);
+
+    return adsCustomer;
   }
 }

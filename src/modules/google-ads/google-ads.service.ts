@@ -107,7 +107,6 @@ export class GoogleAdsService {
       };
     });
 
-    // Fetch managed accounts for each MCC
     const allManagedAccounts: IGoogleAdsAccount[] = [];
 
     for (const mccId of managerIds) {
@@ -122,7 +121,6 @@ export class GoogleAdsService {
       }
     }
 
-    // Deduplicate: top-level accounts take precedence
     const topLevelIds = new Set(topLevelAccounts.map((a) => a.customerId));
     const uniqueManagedAccounts = allManagedAccounts.filter(
       (a) => !topLevelIds.has(a.customerId),
@@ -140,10 +138,6 @@ export class GoogleAdsService {
   /**
    * Fetches all client accounts managed by an MCC account.
    * This includes closed/suspended accounts that won't show in listAccessibleCustomers.
-   *
-   * @param mccCustomerId - The MCC account ID
-   * @param refreshToken - OAuth refresh token
-   * @returns Array of managed customer accounts
    */
   async getManagedAccounts(
     mccCustomerId: string,
@@ -212,15 +206,6 @@ export class GoogleAdsService {
   /**
    * Fetches search terms data from Google Ads for specified date range.
    * This retrieves the actual search queries users typed that triggered your ads.
-   *
-   * @param customerId - Google Ads customer ID (without hyphens)
-   * @param loginCustomerId - Login customer ID (for MCC accounts, use manager ID)
-   * @param refreshToken - OAuth refresh token
-   * @param startDate - Start date in YYYY-MM-DD format
-   * @param endDate - End date in YYYY-MM-DD format
-   * @param campaignId - Optional campaign ID to filter results
-   * @param adGroupId - Optional ad group ID to filter results
-   * @returns Array of search term records with campaign/adgroup/keyword data
    */
   async fetchSearchTerms(
     customerId: string,
@@ -299,9 +284,6 @@ export class GoogleAdsService {
           adGroupId: row.ad_group.id.toString(),
           adGroupName: row.ad_group.name || 'Unknown Ad Group',
           searchTerm: row.search_term_view.search_term || '',
-          // keyword: row.ad_group_criterion?.keyword?.text || '',
-          // matchType:
-          //   (row.ad_group_criterion?.keyword?.match_type as string) || '',
           metrics: {
             impressions: row.metrics?.impressions || 0,
             clicks: row.metrics?.clicks || 0,
@@ -335,16 +317,6 @@ export class GoogleAdsService {
    *
    * Without date range: Returns campaign metadata only (lightweight, fast).
    * With date range: Includes performance metrics for the specified period.
-   *
-   * @param customerId - Google Ads customer ID (without hyphens)
-   * @param loginCustomerId - Login customer ID (for MCC accounts, use manager ID)
-   * @param refreshToken - OAuth refresh token for authentication
-   * @param startDate - Optional start date in YYYY-MM-DD format for metrics
-   * @param endDate - Optional end date in YYYY-MM-DD format for metrics
-   *
-   * @returns Array of campaign objects containing metadata and optional performance metrics
-   *
-   * @throws Error if API query fails or date validation fails
    */
   async fetchCampaigns(
     customerId: string,
@@ -458,17 +430,77 @@ export class GoogleAdsService {
   }
 
   /**
+   * Fetches campaigns with optional ad groups nested inside each campaign.
+   * Uses parallel fetching for optimal performance when including ad groups.
+   *
+   * @returns Array of campaigns with optional ad groups array populated
+   */
+  async fetchCampaignsWithAdGroups(
+    customerId: string,
+    loginCustomerId: string,
+    refreshToken: string,
+    startDate?: string,
+    endDate?: string,
+    includeAdGroups?: boolean,
+  ): Promise<IGoogleAdsCampaign[]> {
+    const campaigns = await this.fetchCampaigns(
+      customerId,
+      loginCustomerId,
+      refreshToken,
+      startDate,
+      endDate,
+    );
+
+    if (!includeAdGroups || campaigns.length === 0) {
+      return campaigns;
+    }
+
+    this.logger.log(
+      `Fetching ad groups for ${campaigns.length} campaigns in parallel`,
+    );
+
+    const campaignsWithAdGroups = await Promise.all(
+      campaigns.map(async (campaign) => {
+        try {
+          const adGroups = await this.fetchAdGroups(
+            customerId,
+            loginCustomerId,
+            refreshToken,
+            campaign.campaignId,
+          );
+
+          return {
+            ...campaign,
+            adGroups,
+          };
+        } catch (error) {
+          this.logger.error(
+            `Failed to fetch ad groups for campaign ${campaign.campaignId}`,
+            error,
+          );
+          return {
+            ...campaign,
+            adGroups: [],
+          };
+        }
+      }),
+    );
+
+    const totalAdGroups = campaignsWithAdGroups.reduce(
+      (sum, c) => sum + (c.adGroups?.length || 0),
+      0,
+    );
+
+    this.logger.log(
+      `Fetched ${totalAdGroups} total ad groups across ${campaigns.length} campaigns`,
+    );
+
+    return campaignsWithAdGroups;
+  }
+
+  /**
    * Fetches all ad groups for a specific Google Ads customer account.
    * Optionally filter by campaign ID to get ad groups for a specific campaign.
-   *
-   * @param customerId - Google Ads customer ID (without hyphens)
-   * @param loginCustomerId - Login customer ID (for MCC accounts, use manager ID)
-   * @param refreshToken - OAuth refresh token for authentication
-   * @param campaignId - Optional campaign ID to filter ad groups
-   *
-   * @returns Array of ad group objects containing metadata and bidding information
-   *
-   * @throws Error if API query fails
    */
   async fetchAdGroups(
     customerId: string,
@@ -565,16 +597,6 @@ export class GoogleAdsService {
   /**
    * Fetches all keywords for a specific ad group in Google Ads.
    * Returns keyword targeting criteria with bid information and quality metrics.
-   *
-   * @param customerId - Google Ads customer ID (without hyphens)
-   * @param loginCustomerId - Login customer ID (for MCC accounts, use manager ID)
-   * @param refreshToken - OAuth refresh token for authentication
-   * @param adGroupId - Ad group ID to fetch keywords from
-   * @param campaignId - Optional campaign ID for additional filtering validation
-   *
-   * @returns Array of keyword objects with targeting and bidding data
-   *
-   * @throws Error if API query fails
    */
   async fetchKeywords(
     customerId: string,
