@@ -8,6 +8,7 @@ import {
   Query,
   BadRequestException,
   UseGuards,
+  Param,
 } from '@nestjs/common';
 import { SyncSearchTermsDto } from './dto/sync-search-terms.dto';
 import { GoogleAdsSyncService } from './google-ads-sync.service';
@@ -106,6 +107,44 @@ export class GoogleAdsController {
     }
 
     return this.googleAdsService.getAccessibleAccounts(refreshToken);
+  }
+
+  /**
+   * Retrieves all client accounts managed by a specific MCC account.
+   *
+   * @returns Array of managed customer accounts with their hierarchy information
+   * @throws UnauthorizedException if user is not authenticated or missing refresh token
+   */
+  @Get('managed-accounts/:mccCustomerId')
+  async getManagedAccounts(
+    @Param('mccCustomerId') mccCustomerId: string,
+    @Req() req: TAuthenticatedRequest,
+  ): Promise<IGoogleAdsAccount[]> {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    const connection =
+      await this.googleOauthRepo.getLatestActiveConnection(userId);
+
+    if (!connection) {
+      throw new UnauthorizedException('Not connected');
+    }
+
+    const refreshToken = connection.refreshToken;
+
+    if (!refreshToken) {
+      throw new UnauthorizedException(
+        'Google Ads account not connected. Please connect your Google Ads account first.',
+      );
+    }
+
+    return this.googleAdsService.getManagedAccounts(
+      mccCustomerId,
+      refreshToken,
+    );
   }
 
   /**

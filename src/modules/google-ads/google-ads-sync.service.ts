@@ -88,7 +88,6 @@ export class GoogleAdsSyncService {
           adGroupId: term.adGroupId,
           adGroupName: term.adGroupName,
           searchTerm: term.searchTerm,
-          keyword: term.keyword,
           metrics: {
             impressions: term.metrics.impressions,
             clicks: term.metrics.clicks,

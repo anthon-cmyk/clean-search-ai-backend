@@ -32,7 +32,6 @@ export class GoogleAdsService {
     const resourceNames = accessible.resource_names ?? [];
     if (!resourceNames.length) return [];
 
-    // Pass 1: fetch metadata about every accessible customer
     const metas = await Promise.all(
       resourceNames.map(async (resourceName) => {
         const customerId = resourceName.split('/')[1];
@@ -41,7 +40,7 @@ export class GoogleAdsService {
           const customerClient = client.Customer({
             customer_id: customerId,
             refresh_token: refreshToken,
-            login_customer_id: customerId, // safe for metadata query
+            login_customer_id: customerId,
           });
 
           const [row] = await customerClient.query(`
@@ -75,7 +74,7 @@ export class GoogleAdsService {
       }),
     );
 
-    const customers = metas.filter(Boolean) as Array<{
+    const directAccessAccounts = metas.filter(Boolean) as Array<{
       customerId: string;
       descriptiveName: string;
       customerName: string;
@@ -84,17 +83,13 @@ export class GoogleAdsService {
       isManagerAccount: boolean;
     }>;
 
-    // Identify manager IDs the user can access
-    const managerIds = customers
+    const managerIds = directAccessAccounts
       .filter((c) => c.isManagerAccount)
       .map((c) => c.customerId);
 
-    // MVP rule: pick a single manager ID to act as login_customer_id
-    // If user has multiple MCCs, UI can later allow selection.
     const fallbackManagerId = managerIds[0] ?? null;
 
-    // Pass 2: attach loginCustomerId + managerCustomerId
-    return customers.map((c) => {
+    const topLevelAccounts = directAccessAccounts.map((c) => {
       const loginCustomerId = c.isManagerAccount
         ? c.customerId
         : (fallbackManagerId ?? c.customerId);
@@ -107,11 +102,111 @@ export class GoogleAdsService {
         timeZone: c.timeZone,
         isManagerAccount: c.isManagerAccount,
         canManageClients: c.isManagerAccount,
-
         loginCustomerId,
         managerCustomerId: c.isManagerAccount ? null : fallbackManagerId,
       };
     });
+
+    // Fetch managed accounts for each MCC
+    const allManagedAccounts: IGoogleAdsAccount[] = [];
+
+    for (const mccId of managerIds) {
+      try {
+        const managed = await this.getManagedAccounts(mccId, refreshToken);
+        allManagedAccounts.push(...managed);
+      } catch (error) {
+        this.logger.warn(
+          `Could not fetch managed accounts for MCC ${mccId}`,
+          error,
+        );
+      }
+    }
+
+    // Deduplicate: top-level accounts take precedence
+    const topLevelIds = new Set(topLevelAccounts.map((a) => a.customerId));
+    const uniqueManagedAccounts = allManagedAccounts.filter(
+      (a) => !topLevelIds.has(a.customerId),
+    );
+
+    const allAccounts = [...topLevelAccounts, ...uniqueManagedAccounts];
+
+    this.logger.log(
+      `Fetched ${topLevelAccounts.length} direct access + ${uniqueManagedAccounts.length} managed = ${allAccounts.length} total accounts`,
+    );
+
+    return allAccounts;
+  }
+
+  /**
+   * Fetches all client accounts managed by an MCC account.
+   * This includes closed/suspended accounts that won't show in listAccessibleCustomers.
+   *
+   * @param mccCustomerId - The MCC account ID
+   * @param refreshToken - OAuth refresh token
+   * @returns Array of managed customer accounts
+   */
+  async getManagedAccounts(
+    mccCustomerId: string,
+    refreshToken: string,
+  ): Promise<IGoogleAdsAccount[]> {
+    const client = this.getClient();
+
+    const mccClient = client.Customer({
+      customer_id: mccCustomerId,
+      refresh_token: refreshToken,
+      login_customer_id: mccCustomerId,
+    });
+
+    const query = `
+    SELECT
+      customer_client.id,
+      customer_client.descriptive_name,
+      customer_client.currency_code,
+      customer_client.time_zone,
+      customer_client.manager,
+      customer_client.test_account,
+      customer_client.status,
+      customer_client.hidden
+    FROM customer_client
+    WHERE customer_client.status IN ('ENABLED', 'CANCELED', 'SUSPENDED', 'CLOSED')
+      AND customer_client.hidden = FALSE
+    ORDER BY customer_client.descriptive_name ASC
+  `;
+
+    try {
+      const results = await mccClient.query(query);
+
+      const managedAccounts: IGoogleAdsAccount[] = [];
+
+      for (const row of results) {
+        const client = row.customer_client;
+        if (!client?.id) continue;
+
+        managedAccounts.push({
+          customerId: client.id.toString(),
+          customerName: client.descriptive_name || `Customer ${client.id}`,
+          descriptiveName: client.descriptive_name || `Customer ${client.id}`,
+          currencyCode: client.currency_code || 'USD',
+          timeZone: client.time_zone || 'UTC',
+          isManagerAccount: !!client.manager,
+          canManageClients: !!client.manager,
+          loginCustomerId: mccCustomerId,
+          managerCustomerId: mccCustomerId,
+        });
+      }
+
+      this.logger.log(
+        `Fetched ${managedAccounts.length} managed accounts for MCC ${mccCustomerId}`,
+      );
+
+      return managedAccounts;
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch managed accounts for MCC ${mccCustomerId}`,
+        error,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -167,8 +262,7 @@ export class GoogleAdsService {
       ad_group.id,
       ad_group.name,
       search_term_view.search_term,
-      ad_group_criterion.keyword.text,
-      ad_group_criterion.keyword.match_type,
+      search_term_view.status,
       metrics.impressions,
       metrics.clicks,
       metrics.cost_micros,
@@ -205,9 +299,9 @@ export class GoogleAdsService {
           adGroupId: row.ad_group.id.toString(),
           adGroupName: row.ad_group.name || 'Unknown Ad Group',
           searchTerm: row.search_term_view.search_term || '',
-          keyword: row.ad_group_criterion?.keyword?.text || '',
-          matchType:
-            (row.ad_group_criterion?.keyword?.match_type as string) || '',
+          // keyword: row.ad_group_criterion?.keyword?.text || '',
+          // matchType:
+          //   (row.ad_group_criterion?.keyword?.match_type as string) || '',
           metrics: {
             impressions: row.metrics?.impressions || 0,
             clicks: row.metrics?.clicks || 0,

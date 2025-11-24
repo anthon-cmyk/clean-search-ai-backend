@@ -19,8 +19,8 @@ export interface IGoogleAdsSearchTerm {
   adGroupId: string;
   adGroupName: string;
   searchTerm: string;
-  keyword: string;
-  matchType: enums.KeywordMatchType | string;
+  // keyword: string;
+  // matchType: enums.KeywordMatchType | string;
   metrics: {
     impressions: number;
     clicks: number;

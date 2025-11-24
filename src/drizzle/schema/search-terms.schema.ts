@@ -26,7 +26,7 @@ export const searchTerms = pgTable(
     adGroupId: text('ad_group_id').notNull(),
     adGroupName: text('ad_group_name').notNull(),
     searchTerm: text('search_term').notNull(),
-    keyword: text('keyword').notNull(),
+    // keyword: text('keyword').notNull(),
 
     metrics: jsonb('metrics').$type<{
       impressions?: number;
@@ -58,7 +58,7 @@ export const insertSearchTermSchema = baseInsertSearchTermSchema.extend({
   adGroupId: z.string().min(1),
   adGroupName: z.string().min(1),
   searchTerm: z.string().min(1),
-  keyword: z.string().min(1),
+  // keyword: z.string().min(1),
 });
 
 export const selectSearchTermSchema = baseSelectSearchTermSchema;
