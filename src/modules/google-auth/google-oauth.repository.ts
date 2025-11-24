@@ -21,6 +21,20 @@ import {
   TSelectSyncJob,
   TSyncJobStatus,
 } from 'src/drizzle/schema';
+import {
+  TInsertGoogleAdsAdGroup,
+  TSelectGoogleAdsAdGroup,
+  googleAdsAdGroups,
+} from 'src/drizzle/schema/google_ads_ad_groups.schema';
+import {
+  TInsertGoogleAdsCampaign,
+  TSelectGoogleAdsCampaign,
+  googleAdsCampaigns,
+} from 'src/drizzle/schema/google_ads_campaigns.schema';
+import {
+  TInsertGoogleAdsKeyword,
+  googleAdsKeywords,
+} from 'src/drizzle/schema/google_ads_keywords.schema';
 
 @Injectable()
 export class GoogleOauthRepository {
@@ -337,5 +351,99 @@ export class GoogleOauthRepository {
       .where(whereClause)
       .orderBy(desc(searchTerms.fetchedAt))
       .limit(10000);
+  }
+
+  async upsertCampaign(
+    data: TInsertGoogleAdsCampaign,
+  ): Promise<TSelectGoogleAdsCampaign> {
+    const [existing] = await this.drizzle.db
+      .select()
+      .from(googleAdsCampaigns)
+      .where(
+        and(
+          eq(googleAdsCampaigns.adsCustomerId, data.adsCustomerId),
+          eq(googleAdsCampaigns.campaignId, data.campaignId),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      const [updated] = await this.drizzle.db
+        .update(googleAdsCampaigns)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(googleAdsCampaigns.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await this.drizzle.db
+      .insert(googleAdsCampaigns)
+      .values(data)
+      .returning();
+
+    return created;
+  }
+
+  async upsertAdGroup(
+    data: TInsertGoogleAdsAdGroup,
+  ): Promise<TSelectGoogleAdsAdGroup> {
+    const [existing] = await this.drizzle.db
+      .select()
+      .from(googleAdsAdGroups)
+      .where(
+        and(
+          eq(googleAdsAdGroups.campaignDbId, data.campaignDbId),
+          eq(googleAdsAdGroups.adGroupId, data.adGroupId),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      const [updated] = await this.drizzle.db
+        .update(googleAdsAdGroups)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(googleAdsAdGroups.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await this.drizzle.db
+      .insert(googleAdsAdGroups)
+      .values(data)
+      .returning();
+
+    return created;
+  }
+
+  async bulkUpsertKeywords(
+    keywords: TInsertGoogleAdsKeyword[],
+  ): Promise<number> {
+    if (keywords.length === 0) return 0;
+
+    let count = 0;
+    for (const keyword of keywords) {
+      const [existing] = await this.drizzle.db
+        .select()
+        .from(googleAdsKeywords)
+        .where(
+          and(
+            eq(googleAdsKeywords.adGroupDbId, keyword.adGroupDbId),
+            eq(googleAdsKeywords.keywordId, keyword.keywordId),
+          ),
+        )
+        .limit(1);
+
+      if (existing) {
+        await this.drizzle.db
+          .update(googleAdsKeywords)
+          .set({ ...keyword, updatedAt: new Date() })
+          .where(eq(googleAdsKeywords.id, existing.id));
+      } else {
+        await this.drizzle.db.insert(googleAdsKeywords).values(keyword);
+      }
+      count++;
+    }
+
+    return count;
   }
 }

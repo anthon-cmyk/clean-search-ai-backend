@@ -28,6 +28,7 @@ import { SupabaseAuthGuard } from '../supabase/guards/supabase-auth.guard';
 import { FetchCampaignsDto } from 'src/dto/fetch-campaigns.dto';
 import { FetchKeywordsDto } from './dto/fetch-keywords.dto';
 import { FetchAdGroupsDto } from './dto/fetch-ad-groups.dto';
+import { GoogleAdsFullSyncService } from './google-ads-full-sync.service';
 
 @UseGuards(SupabaseAuthGuard)
 @Controller('google-ads')
@@ -36,6 +37,7 @@ export class GoogleAdsController {
     private googleAdsSyncService: GoogleAdsSyncService,
     private googleAdsService: GoogleAdsService,
     private googleOauthRepo: GoogleOauthRepository,
+    private googleAdsFullSyncService: GoogleAdsFullSyncService,
   ) {}
 
   /**
@@ -279,6 +281,32 @@ export class GoogleAdsController {
       refreshToken,
       dto.adGroupId,
       dto.campaignId,
+    );
+  }
+
+  @Post('sync-account-structure')
+  async syncAccountStructure(
+    @Body()
+    dto: {
+      customerId: string;
+      loginCustomerId: string;
+      startDate?: string;
+      endDate?: string;
+    },
+    @Req() req: TAuthenticatedRequest,
+  ) {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    return await this.googleAdsFullSyncService.syncAccountStructure(
+      userId,
+      dto.customerId,
+      dto.loginCustomerId,
+      dto.startDate,
+      dto.endDate,
     );
   }
 }
