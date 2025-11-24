@@ -3,7 +3,9 @@ import { GoogleAdsApi } from 'google-ads-api';
 import { ConfigService } from '@nestjs/config';
 import {
   IGoogleAdsAccount,
+  IGoogleAdsAdGroup,
   IGoogleAdsCampaign,
+  IGoogleAdsKeyword,
   IGoogleAdsSearchTerm,
 } from './interfaces/google-ads.interface';
 
@@ -355,6 +357,222 @@ export class GoogleAdsService {
     } catch (error) {
       this.logger.error(
         `Failed to fetch campaigns for customer ${customerId}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Fetches all ad groups for a specific Google Ads customer account.
+   * Optionally filter by campaign ID to get ad groups for a specific campaign.
+   *
+   * @param customerId - Google Ads customer ID (without hyphens)
+   * @param loginCustomerId - Login customer ID (for MCC accounts, use manager ID)
+   * @param refreshToken - OAuth refresh token for authentication
+   * @param campaignId - Optional campaign ID to filter ad groups
+   *
+   * @returns Array of ad group objects containing metadata and bidding information
+   *
+   * @throws Error if API query fails
+   */
+  async fetchAdGroups(
+    customerId: string,
+    loginCustomerId: string,
+    refreshToken: string,
+    campaignId?: string,
+  ): Promise<IGoogleAdsAdGroup[]> {
+    const client = this.getClient();
+
+    const customer = client.Customer({
+      customer_id: customerId,
+      refresh_token: refreshToken,
+      login_customer_id: loginCustomerId,
+    });
+
+    const whereConditions = [
+      `ad_group.status IN ('ENABLED', 'PAUSED')`,
+      `campaign.status IN ('ENABLED', 'PAUSED')`,
+    ];
+
+    if (campaignId) {
+      whereConditions.push(`campaign.id = ${campaignId}`);
+    }
+
+    const query = `
+    SELECT
+      campaign.id,
+      campaign.name,
+      ad_group.id,
+      ad_group.name,
+      ad_group.status,
+      ad_group.type,
+      ad_group.cpc_bid_micros,
+      ad_group.target_cpa_micros
+    FROM ad_group
+    WHERE ${whereConditions.join(' AND ')}
+    ORDER BY campaign.name ASC, ad_group.name ASC
+    LIMIT 10000
+  `;
+
+    try {
+      const results = await customer.query(query);
+
+      const adGroups: IGoogleAdsAdGroup[] = [];
+
+      for (const row of results) {
+        if (
+          !row.campaign ||
+          !row.campaign.id ||
+          !row.ad_group ||
+          !row.ad_group.id
+        ) {
+          this.logger.warn(
+            `Skipping ad group row with missing required data: ${JSON.stringify(row)}`,
+          );
+          continue;
+        }
+
+        const cpcBidMicros = row.ad_group.cpc_bid_micros || 0;
+        const targetCpaMicros = row.ad_group.target_cpa_micros || undefined;
+
+        adGroups.push({
+          adGroupId: row.ad_group.id.toString(),
+          adGroupName: row.ad_group.name || 'Unknown Ad Group',
+          campaignId: row.campaign.id.toString(),
+          campaignName: row.campaign.name || 'Unknown Campaign',
+          status: row.ad_group.status || 'UNKNOWN',
+          type: row.ad_group.type || 'UNKNOWN',
+          cpcBidMicros,
+          cpcBid: cpcBidMicros / 1_000_000,
+          targetCpaMicros,
+          targetCpa: targetCpaMicros ? targetCpaMicros / 1_000_000 : undefined,
+        });
+      }
+
+      const filterDesc = campaignId
+        ? `for campaign ${campaignId}`
+        : 'across all campaigns';
+
+      this.logger.log(
+        `Fetched ${adGroups.length} ad groups ${filterDesc} for customer ${customerId}`,
+      );
+
+      return adGroups;
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch ad groups for customer ${customerId}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Fetches all keywords for a specific ad group in Google Ads.
+   * Returns keyword targeting criteria with bid information and quality metrics.
+   *
+   * @param customerId - Google Ads customer ID (without hyphens)
+   * @param loginCustomerId - Login customer ID (for MCC accounts, use manager ID)
+   * @param refreshToken - OAuth refresh token for authentication
+   * @param adGroupId - Ad group ID to fetch keywords from
+   * @param campaignId - Optional campaign ID for additional filtering validation
+   *
+   * @returns Array of keyword objects with targeting and bidding data
+   *
+   * @throws Error if API query fails
+   */
+  async fetchKeywords(
+    customerId: string,
+    loginCustomerId: string,
+    refreshToken: string,
+    adGroupId: string,
+    campaignId?: string,
+  ): Promise<IGoogleAdsKeyword[]> {
+    const client = this.getClient();
+
+    const customer = client.Customer({
+      customer_id: customerId,
+      refresh_token: refreshToken,
+      login_customer_id: loginCustomerId,
+    });
+
+    const whereConditions = [
+      `ad_group.id = ${adGroupId}`,
+      `ad_group_criterion.type = 'KEYWORD'`,
+      `ad_group_criterion.status IN ('ENABLED', 'PAUSED')`,
+    ];
+
+    if (campaignId) {
+      whereConditions.push(`campaign.id = ${campaignId}`);
+    }
+
+    const query = `
+    SELECT
+      campaign.id,
+      campaign.name,
+      ad_group.id,
+      ad_group.name,
+      ad_group_criterion.criterion_id,
+      ad_group_criterion.keyword.text,
+      ad_group_criterion.keyword.match_type,
+      ad_group_criterion.status,
+      ad_group_criterion.final_urls,
+      ad_group_criterion.cpc_bid_micros,
+      ad_group_criterion.quality_info.quality_score
+    FROM ad_group_criterion
+    WHERE ${whereConditions.join(' AND ')}
+    ORDER BY ad_group_criterion.keyword.text ASC
+    LIMIT 10000
+  `;
+
+    try {
+      const results = await customer.query(query);
+
+      const keywords: IGoogleAdsKeyword[] = [];
+
+      for (const row of results) {
+        if (
+          !row.campaign ||
+          !row.campaign.id ||
+          !row.ad_group ||
+          !row.ad_group.id ||
+          !row.ad_group_criterion ||
+          !row.ad_group_criterion.criterion_id
+        ) {
+          this.logger.warn(
+            `Skipping keyword row with missing required data: ${JSON.stringify(row)}`,
+          );
+          continue;
+        }
+
+        const cpcBidMicros = row.ad_group_criterion.cpc_bid_micros || 0;
+
+        keywords.push({
+          keywordId: row.ad_group_criterion.criterion_id.toString(),
+          adGroupId: row.ad_group.id.toString(),
+          adGroupName: row.ad_group.name || 'Unknown Ad Group',
+          campaignId: row.campaign.id.toString(),
+          campaignName: row.campaign.name || 'Unknown Campaign',
+          keywordText: row.ad_group_criterion.keyword?.text || '',
+          matchType:
+            (row.ad_group_criterion.keyword?.match_type as string) || 'UNKNOWN',
+          status: row.ad_group_criterion.status || 'UNKNOWN',
+          finalUrls: row.ad_group_criterion.final_urls || [],
+          cpcBidMicros,
+          cpcBid: cpcBidMicros / 1_000_000,
+          qualityScore: row.ad_group_criterion.quality_info?.quality_score,
+        });
+      }
+
+      this.logger.log(
+        `Fetched ${keywords.length} keywords for ad group ${adGroupId} in customer ${customerId}`,
+      );
+
+      return keywords;
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch keywords for ad group ${adGroupId} in customer ${customerId}`,
         error,
       );
       throw error;

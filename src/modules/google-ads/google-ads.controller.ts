@@ -13,7 +13,9 @@ import { SyncSearchTermsDto } from './dto/sync-search-terms.dto';
 import { GoogleAdsSyncService } from './google-ads-sync.service';
 import {
   IGoogleAdsAccount,
+  IGoogleAdsAdGroup,
   IGoogleAdsCampaign,
+  IGoogleAdsKeyword,
   IGoogleAdsSearchTerm,
   ISyncResult,
 } from './interfaces/google-ads.interface';
@@ -23,6 +25,8 @@ import type { TAuthenticatedRequest } from 'src/types/authenticated-request.type
 import { GoogleOauthRepository } from '../google-auth/google-oauth.repository';
 import { SupabaseAuthGuard } from '../supabase/guards/supabase-auth.guard';
 import { FetchCampaignsDto } from 'src/dto/fetch-campaigns.dto';
+import { FetchKeywordsDto } from './dto/fetch-keywords.dto';
+import { FetchAdGroupsDto } from './dto/fetch-ad-groups.dto';
 
 @UseGuards(SupabaseAuthGuard)
 @Controller('google-ads')
@@ -218,6 +222,100 @@ export class GoogleAdsController {
       dto.customerId,
       dto.startDate,
       dto.endDate,
+    );
+  }
+
+  /**
+   * Retrieves all ad groups for a specific Google Ads customer account.
+   * Optionally filter by campaign ID to get ad groups within a specific campaign.
+   *
+   * Ad groups are organizational containers within campaigns that group related
+   * keywords and ads together by theme or targeting.
+   *
+   * @returns Array of ad group objects with metadata and bidding information
+   *
+   * @throws UnauthorizedException if user is not authenticated or refresh token is missing
+   * @throws BadRequestException if required parameters are missing
+   */
+  @Get('ad-groups')
+  async fetchAdGroups(
+    @Query() dto: FetchAdGroupsDto,
+    @Req() req: TAuthenticatedRequest,
+  ): Promise<IGoogleAdsAdGroup[]> {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    const connection =
+      await this.googleOauthRepo.getLatestActiveConnection(userId);
+
+    if (!connection) {
+      throw new UnauthorizedException('Not connected');
+    }
+
+    const refreshToken = connection.refreshToken;
+
+    if (!refreshToken) {
+      throw new UnauthorizedException(
+        'Google Ads account not connected. Please connect your Google Ads account first.',
+      );
+    }
+
+    return this.googleAdsService.fetchAdGroups(
+      dto.customerId,
+      dto.loginCustomerId,
+      refreshToken,
+      dto.campaignId,
+    );
+  }
+
+  /**
+   * Retrieves all keywords for a specific ad group in Google Ads.
+   * Returns targeting keywords with bid amounts, match types, and quality scores.
+   *
+   * Keywords are the search terms you bid on in Google Ads. This endpoint
+   * returns the configured keywords in an ad group, not the actual search
+   * terms users typed (use /search-terms for that).
+   *
+   * @returns Array of keyword objects with targeting and performance data
+   *
+   * @throws UnauthorizedException if user is not authenticated or refresh token is missing
+   * @throws BadRequestException if required parameters are missing
+   */
+  @Get('keywords')
+  async fetchKeywords(
+    @Query() dto: FetchKeywordsDto,
+    @Req() req: TAuthenticatedRequest,
+  ): Promise<IGoogleAdsKeyword[]> {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    const connection =
+      await this.googleOauthRepo.getLatestActiveConnection(userId);
+
+    if (!connection) {
+      throw new UnauthorizedException('Not connected');
+    }
+
+    const refreshToken = connection.refreshToken;
+
+    if (!refreshToken) {
+      throw new UnauthorizedException(
+        'Google Ads account not connected. Please connect your Google Ads account first.',
+      );
+    }
+
+    return this.googleAdsService.fetchKeywords(
+      dto.customerId,
+      dto.loginCustomerId,
+      refreshToken,
+      dto.adGroupId,
+      dto.campaignId,
     );
   }
 }

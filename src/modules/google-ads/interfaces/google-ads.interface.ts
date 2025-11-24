@@ -64,3 +64,31 @@ export interface ISyncResult {
   endDate: string;
   errorMessage?: string;
 }
+
+export interface IGoogleAdsAdGroup {
+  adGroupId: string;
+  adGroupName: string;
+  campaignId: string;
+  campaignName: string;
+  status: enums.AdGroupStatus | string;
+  type: enums.AdGroupType | string;
+  cpcBidMicros: number;
+  cpcBid: number;
+  targetCpaMicros?: number;
+  targetCpa?: number;
+}
+
+export interface IGoogleAdsKeyword {
+  keywordId: string;
+  adGroupId: string;
+  adGroupName: string;
+  campaignId: string;
+  campaignName: string;
+  keywordText: string;
+  matchType: string;
+  status: enums.AdGroupCriterionStatus | string;
+  finalUrls: string[];
+  cpcBidMicros: number;
+  cpcBid: number;
+  qualityScore?: number | null;
+}
