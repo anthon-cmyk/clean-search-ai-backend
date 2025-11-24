@@ -4,6 +4,9 @@ export class SyncSearchTermsDto {
   @IsString()
   customerId: string;
 
+  @IsString()
+  loginCustomerId: string;
+
   @IsDateString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'startDate must be in YYYY-MM-DD format',

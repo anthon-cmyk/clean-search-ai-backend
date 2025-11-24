@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { GoogleAdsService } from './google-ads.service';
 import { GoogleOauthRepository } from '../google-auth/google-oauth.repository';
 import { TInsertSearchTerm } from '../../drizzle/schema/search-terms.schema';
@@ -15,86 +20,76 @@ export class GoogleAdsSyncService {
   ) {}
 
   /**
-   * Orchestrates the complete sync pipeline:
-   * 1. Validates user and customer
-   * 2. Creates sync job for tracking
-   * 3. Fetches search terms from Google Ads API
-   * 4. Transforms and stores data in database
-   * 5. Updates sync job and customer metadata
+   * Syncs search terms from Google Ads API to the database.
+   * Creates a sync job, fetches data, stores it, and updates job status.
    *
-   * @returns Comprehensive sync result with job tracking
+   * @returns Sync result containing job status and record counts
    */
   async syncSearchTerms(
     userId: string,
     customerId: string,
+    loginCustomerId: string,
     startDate: string,
     endDate: string,
   ): Promise<ISyncResult> {
-    const adsCustomer = await this.ensureCustomerExists(userId, customerId);
-
     const connection =
       await this.googleOauthRepo.getLatestActiveConnection(userId);
 
-    if (!connection) {
-      throw new NotFoundException('No active Google OAuth connection found');
+    if (!connection?.refreshToken) {
+      throw new UnauthorizedException('No active Google connection found');
     }
 
-    const syncJob = await this.googleOauthRepo.createSyncJob({
-      adsCustomerId: adsCustomer.id,
-      status: 'pending',
-      syncStartDate: startDate,
-      syncEndDate: endDate,
-      syncType: 'manual',
-    });
-
-    this.logger.log(
-      `Created sync job ${syncJob.id} for customer ${customerId}`,
+    const adsCustomer = await this.getOrCreateAdsCustomer(
+      userId,
+      customerId,
+      loginCustomerId,
+      connection.id,
     );
 
+    const job = await this.googleOauthRepo.createSyncJob({
+      adsCustomerId: adsCustomer.id,
+      syncStartDate: startDate,
+      syncEndDate: endDate,
+      status: 'running',
+      startedAt: new Date(),
+    });
+
     try {
-      await this.googleOauthRepo.updateSyncJob(syncJob.id, {
+      await this.googleOauthRepo.updateSyncJob(job.id, {
         status: 'running',
         startedAt: new Date(),
       });
 
-      this.logger.log(
-        `Fetching search terms for customer ${customerId} from ${startDate} to ${endDate}`,
-      );
-
-      const searchTermsData = await this.googleAdsService.fetchSearchTerms(
-        adsCustomer.customerId,
-        adsCustomer.loginCustomerId,
+      const searchTerms = await this.googleAdsService.fetchSearchTerms(
+        customerId,
+        loginCustomerId, // ✅ Pass it here
         connection.refreshToken,
         startDate,
         endDate,
       );
 
-      const fetchedAt = new Date();
-      const searchTermsToInsert: TInsertSearchTerm[] = searchTermsData.map(
-        (term) => ({
-          adsCustomerId: adsCustomer.id,
-          campaignId: term.campaignId,
-          campaignName: term.campaignName,
-          adGroupId: term.adGroupId,
-          adGroupName: term.adGroupName,
-          searchTerm: term.searchTerm,
-          metrics: {
-            impressions: term.metrics.impressions,
-            clicks: term.metrics.clicks,
-            cost: term.metrics.cost,
-            conversions: term.metrics.conversions,
-          },
-          fetchedAt,
-        }),
-      );
+      const termsToInsert: TInsertSearchTerm[] = searchTerms.map((term) => ({
+        adsCustomerId: adsCustomer.id,
+        campaignId: term.campaignId,
+        campaignName: term.campaignName,
+        adGroupId: term.adGroupId,
+        adGroupName: term.adGroupName,
+        searchTerm: term.searchTerm,
+        impressions: term.metrics.impressions,
+        clicks: term.metrics.clicks,
+        cost: term.metrics.cost,
+        conversions: term.metrics.conversions,
+        conversionsValue: term.metrics.conversionsValue,
+        fetchedAt: new Date(),
+      }));
 
-      const storedCount =
-        await this.googleOauthRepo.bulkInsertSearchTerms(searchTermsToInsert);
+      const recordsStored =
+        await this.googleOauthRepo.bulkInsertSearchTerms(termsToInsert);
 
-      await this.googleOauthRepo.updateSyncJob(syncJob.id, {
+      await this.googleOauthRepo.updateSyncJob(job.id, {
         status: 'completed',
         completedAt: new Date(),
-        recordsProcessed: storedCount,
+        recordsProcessed: recordsStored,
       });
 
       await this.googleOauthRepo.updateCustomerLastSync(
@@ -102,48 +97,63 @@ export class GoogleAdsSyncService {
         new Date(),
       );
 
-      this.logger.log(
-        `Sync job ${syncJob.id} completed: ${storedCount}/${searchTermsData.length} records stored`,
-      );
-
       return {
-        jobId: syncJob.id,
-        customerId: adsCustomer.customerId,
-        customerName: adsCustomer.customerName || 'Unknown',
+        jobId: job.id,
+        customerId,
+        customerName: adsCustomer.customerName || 'No Customer Name',
         status: 'completed',
-        recordsFetched: searchTermsData.length,
-        recordsStored: storedCount,
+        recordsFetched: searchTerms.length,
+        recordsStored,
         startDate,
         endDate,
       };
     } catch (error) {
-      this.logger.error(
-        `Sync job ${syncJob.id} failed for customer ${customerId}`,
-        error,
-      );
+      this.logger.error('Sync failed', error);
 
-      await this.googleOauthRepo.updateSyncJob(syncJob.id, {
+      await this.googleOauthRepo.updateSyncJob(job.id, {
         status: 'failed',
         completedAt: new Date(),
         errorMessage: error.message,
-        errorDetails: {
-          stack: error.stack,
-          name: error.name,
-        },
+        errorDetails: { stack: error.stack },
       });
 
-      return {
-        jobId: syncJob.id,
-        customerId: adsCustomer.customerId,
-        customerName: adsCustomer.customerName || 'Unknown',
-        status: 'failed',
-        recordsFetched: 0,
-        recordsStored: 0,
-        startDate,
-        endDate,
-        errorMessage: error.message,
-      };
+      throw error;
     }
+  }
+
+  /**
+   * Gets existing Google Ads customer or creates a new one if it doesn't exist.
+   * This ensures we have a database record for tracking sync jobs and search terms.
+   *
+   * @returns Google Ads customer database record
+   */
+  private async getOrCreateAdsCustomer(
+    userId: string,
+    customerId: string,
+    loginCustomerId: string,
+    oauthConnectionId: string,
+  ): Promise<TSelectGoogleAdsCustomer> {
+    const existing = await this.googleOauthRepo.getAdsCustomerByCustomerId(
+      customerId,
+      oauthConnectionId,
+    );
+
+    if (existing) {
+      return existing;
+    }
+
+    return this.googleOauthRepo.createAdsCustomer({
+      oauthConnectionId,
+      customerId,
+      loginCustomerId,
+      customerName: `Customer ${customerId}`,
+      customerDescriptiveName: null,
+      isManagerAccount: false,
+      managerCustomerId: null,
+      currencyCode: 'USD',
+      timeZone: 'UTC',
+      isActive: true,
+    });
   }
 
   /**

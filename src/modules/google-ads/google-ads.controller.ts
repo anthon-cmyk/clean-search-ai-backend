@@ -220,6 +220,7 @@ export class GoogleAdsController {
     return this.googleAdsSyncService.syncSearchTerms(
       userId,
       dto.customerId,
+      dto.loginCustomerId,
       dto.startDate,
       dto.endDate,
     );
