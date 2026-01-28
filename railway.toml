@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "pnpm run start:prod"
+startCommand = "HOST=0.0.0.0 pnpm run start:prod"
 healthcheckPath = "/"
 healthcheckTimeout = 100
 restartPolicyType = "on_failure"
